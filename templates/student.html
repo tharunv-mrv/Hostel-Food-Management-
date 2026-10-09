@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal | Hostel Food Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-icon">🎓</div>
+                <div>
+                    <h1 class="brand-title" id="topStudentName">Student Portal</h1>
+                    <p class="brand-subtitle" id="topStudentSrn">Hostel Resident Dashboard</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/" class="btn btn-outline nav-link" title="Live Scanner Kiosk">
+                    <span>📷</span> Scanner
+                </a>
+                <a href="/logout" class="btn btn-secondary nav-link">
+                    <span>🚪</span> Logout
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content container student-container">
+        
+        <!-- Top Status Bar & Meal Privilege Card -->
+        <section class="student-status-banner card" id="mealAccessBanner">
+            <div class="status-banner-content">
+                <div class="status-banner-icon" id="accessIcon">✅</div>
+                <div>
+                    <h3 id="accessTitle">Meal Access Privileges: Active</h3>
+                    <p id="accessDesc">You are eligible to claim daily Breakfast and Lunch at the college canteen.</p>
+                </div>
+            </div>
+            <span class="badge badge-success" id="accessBadge">ELIGIBLE</span>
+        </section>
+
+        <!-- Profile & Fee Summary Grid -->
+        <div class="student-summary-grid">
+            <!-- Profile Card -->
+            <div class="card student-info-card">
+                <div class="card-header">
+                    <h3 class="card-title">👤 Resident Information</h3>
+                    <span class="badge badge-neutral" id="profileBranchYear">--</span>
+                </div>
+                <div class="profile-details-list">
+                    <div class="info-row">
+                        <span class="label">Full Name:</span>
+                        <strong class="val" id="profileName">--</strong>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Student ID / SRN:</span>
+                        <strong class="val mono" id="profileId">--</strong>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Hostel & Room:</span>
+                        <strong class="val" id="profileRoom">--</strong>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Sharing Type:</span>
+                        <strong class="val" id="profileSharing">--</strong>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Registered Phone:</span>
+                        <strong class="val mono" id="profilePhone">--</strong>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Biometric Enrollment:</span>
+                        <span id="profileBioStatus" class="badge badge-success">Enrolled</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fee Summary Card -->
+            <div class="card fee-card">
+                <div class="card-header">
+                    <h3 class="card-title">💳 Hostel Fee Account</h3>
+                    <span class="badge badge-warning" id="feeStatusBadge">--</span>
+                </div>
+                <div class="fee-metrics">
+                    <div class="fee-stat">
+                        <span class="fee-label">Total Hostel Fee</span>
+                        <h3 class="fee-val" id="totalFeeVal">₹0.00</h3>
+                    </div>
+                    <div class="fee-stat">
+                        <span class="fee-label">Total Amount Paid</span>
+                        <h3 class="fee-val text-success" id="paidFeeVal">₹0.00</h3>
+                    </div>
+                    <div class="fee-stat highlight-stat">
+                        <span class="fee-label">Pending Dues</span>
+                        <h3 class="fee-val text-danger" id="pendingFeeVal">₹0.00</h3>
+                    </div>
+                </div>
+                <div class="fee-footer-note">
+                    <small>💡 For payment receipts or fee clearance queries, please visit the hostel accounts office.</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Today's Canteen Menus -->
+        <section class="card menus-card">
+            <div class="card-header">
+                <h3 class="card-title">🍲 Today's Canteen Menu & Serving Hours</h3>
+            </div>
+            <div class="menu-cards-grid">
+                <div class="menu-box">
+                    <div class="menu-box-header">
+                        <h4>🌅 Breakfast</h4>
+                        <span class="badge badge-neutral" id="bfHours">07:30 AM - 10:30 AM</span>
+                    </div>
+                    <p class="menu-items" id="bfMenu">Loading breakfast menu...</p>
+                </div>
+
+                <div class="menu-box">
+                    <div class="menu-box-header">
+                        <h4>☀️ Lunch</h4>
+                        <span class="badge badge-neutral" id="lunchHours">11:30 AM - 03:30 PM</span>
+                    </div>
+                    <p class="menu-items" id="lunchMenu">Loading lunch menu...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Personal Meal History & Payment History Tabs -->
+        <section class="card table-card">
+            <div class="tab-selector-inline">
+                <button class="tab-link active" onclick="switchStudentTab('meals')">
+                    🍽️ My Meal Attendance History
+                </button>
+                <button class="tab-link" onclick="switchStudentTab('payments')">
+                    📄 My Payment Receipts
+                </button>
+            </div>
+
+            <!-- Meal History Table -->
+            <div id="mealsView" class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Meal Type</th>
+                            <th>Entry Time</th>
+                            <th>Verification Method</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentMealsBody">
+                        <tr><td colspan="5" class="text-center">Loading meal records...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Payment Receipts Table -->
+            <div id="paymentsView" class="table-responsive" style="display: none;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Receipt / Ref No.</th>
+                            <th>Payment Method</th>
+                            <th>Amount (INR)</th>
+                            <th>Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentPaymentsBody">
+                        <tr><td colspan="5" class="text-center">Loading payment receipts...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <p>Hostel Food Management System &bull; Student Self-Service Portal</p>
+    </footer>
+
+    <script>
+        function switchStudentTab(tab) {
+            const tabs = document.querySelectorAll('.tab-link');
+            tabs.forEach(t => t.classList.remove('active'));
+            if (tab === 'meals') {
+                tabs[0].classList.add('active');
+                document.getElementById('mealsView').style.display = 'block';
+                document.getElementById('paymentsView').style.display = 'none';
+            } else {
+                tabs[1].classList.add('active');
+                document.getElementById('mealsView').style.display = 'none';
+                document.getElementById('paymentsView').style.display = 'block';
+            }
+        }
+
+        async function loadStudentData() {
+            try {
+                // Profile & Fees
+                const profileRes = await fetch('/api/student/profile');
+                const profileData = await profileRes.json();
+                if (profileRes.ok && profileData.success) {
+                    const s = profileData.student;
+                    document.getElementById('topStudentName').textContent = s.name;
+                    document.getElementById('topStudentSrn').textContent = `SRN: ${s.srn || s.student_id}`;
+
+                    document.getElementById('profileName').textContent = s.name;
+                    document.getElementById('profileId').textContent = `${s.student_id} (${s.srn || s.student_id})`;
+                    document.getElementById('profileRoom').textContent = `${s.hostel} - Room ${s.room_number || '--'}`;
+                    document.getElementById('profileSharing').textContent = `${s.room_sharing_type} (${s.room_occupants} Occupants)`;
+                    document.getElementById('profilePhone').textContent = s.phone_number || '--';
+                    document.getElementById('profileBranchYear').textContent = `${s.branch} • ${s.year}`;
+
+                    // Biometric badge
+                    const bioBadge = document.getElementById('profileBioStatus');
+                    if (s.has_face_enrolled) {
+                        bioBadge.className = 'badge badge-success';
+                        bioBadge.textContent = 'Enrolled ✅';
+                    } else {
+                        bioBadge.className = 'badge badge-warning';
+                        bioBadge.textContent = 'Pending Enrollment ⚠️';
+                    }
+
+                    // Meal access privilege
+                    const banner = document.getElementById('mealAccessBanner');
+                    const accessIcon = document.getElementById('accessIcon');
+                    const accessTitle = document.getElementById('accessTitle');
+                    const accessDesc = document.getElementById('accessDesc');
+                    const accessBadge = document.getElementById('accessBadge');
+
+                    if (s.meal_access_enabled && s.active) {
+                        banner.className = 'student-status-banner card banner-success';
+                        accessIcon.textContent = '✅';
+                        accessTitle.textContent = 'Meal Privileges: Active & Eligible';
+                        accessDesc.textContent = 'You are cleared to access daily Breakfast and Lunch at the college canteen.';
+                        accessBadge.className = 'badge badge-success';
+                        accessBadge.textContent = 'ELIGIBLE';
+                    } else {
+                        banner.className = 'student-status-banner card banner-danger';
+                        accessIcon.textContent = '⛔';
+                        accessTitle.textContent = 'Meal Access Restricted';
+                        accessDesc.textContent = s.meal_restriction_reason || 'Access disabled. Please contact hostel administration.';
+                        accessBadge.className = 'badge badge-danger';
+                        accessBadge.textContent = 'RESTRICTED';
+                    }
+
+                    // Fees
+                    document.getElementById('totalFeeVal').textContent = `₹${s.total_hostel_fees.toFixed(2)}`;
+                    document.getElementById('paidFeeVal').textContent = `₹${s.total_fees_paid.toFixed(2)}`;
+                    document.getElementById('pendingFeeVal').textContent = `₹${s.pending_fees.toFixed(2)}`;
+
+                    const feeBadge = document.getElementById('feeStatusBadge');
+                    feeBadge.textContent = s.fee_status;
+                    if (s.fee_status === 'PAID') feeBadge.className = 'badge badge-success';
+                    else if (s.fee_status === 'PARTIALLY PAID') feeBadge.className = 'badge badge-warning';
+                    else feeBadge.className = 'badge badge-danger';
+
+                    // Payment history table
+                    const payBody = document.getElementById('studentPaymentsBody');
+                    if (!profileData.payments || profileData.payments.length === 0) {
+                        payBody.innerHTML = '<tr><td colspan="5" class="text-center">No payment receipts on record.</td></tr>';
+                    } else {
+                        payBody.innerHTML = profileData.payments.map(p => `
+                            <tr>
+                                <td style="font-family:var(--font-mono);">${p.payment_date}</td>
+                                <td><strong style="font-family:var(--font-mono);color:var(--color-primary);">${p.reference_no}</strong></td>
+                                <td><span class="badge badge-neutral">${p.payment_method}</span></td>
+                                <td><strong>₹${p.amount.toFixed(2)}</strong></td>
+                                <td style="color:var(--text-secondary);">${p.remarks || '--'}</td>
+                            </tr>
+                        `).join('');
+                    }
+                }
+
+                // Menus
+                const menuRes = await fetch('/api/student/menus');
+                const menuData = await menuRes.json();
+                if (menuRes.ok && menuData.success) {
+                    if (menuData.timings) {
+                        document.getElementById('bfHours').textContent = menuData.timings.breakfast;
+                        document.getElementById('lunchHours').textContent = menuData.timings.lunch;
+                    }
+                    menuData.menus.forEach(m => {
+                        if (m.meal_type === 'Breakfast') document.getElementById('bfMenu').textContent = m.items;
+                        if (m.meal_type === 'Lunch') document.getElementById('lunchMenu').textContent = m.items;
+                    });
+                }
+
+                // Meal Attendance History
+                const mealsRes = await fetch('/api/student/meals');
+                const mealsData = await mealsRes.json();
+                const mealsBody = document.getElementById('studentMealsBody');
+                if (mealsRes.ok && mealsData.success) {
+                    if (!mealsData.entries || mealsData.entries.length === 0) {
+                        mealsBody.innerHTML = '<tr><td colspan="5" class="text-center">No meal entries recorded yet.</td></tr>';
+                    } else {
+                        mealsBody.innerHTML = mealsData.entries.map(e => `
+                            <tr>
+                                <td style="font-family:var(--font-mono);">${e.entry_date}</td>
+                                <td><span class="badge ${e.meal === 'Breakfast' ? 'badge-neutral' : 'badge-warning'}">${e.meal}</span></td>
+                                <td style="font-family:var(--font-mono);">${e.entry_time}</td>
+                                <td><span class="badge badge-neutral">${e.verification_method.toUpperCase()}</span></td>
+                                <td><span class="badge badge-success">✅ ${e.status}</span></td>
+                            </tr>
+                        `).join('');
+                    }
+                }
+            } catch (err) {
+                console.error('Error loading student dashboard:', err);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadStudentData);
+    </script>
+</body>
+</html>

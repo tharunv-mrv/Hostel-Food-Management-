@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | AI Hostel Food Management</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-icon">⚙️</div>
+                <div>
+                    <h1 class="brand-title">Admin Management Portal</h1>
+                    <p class="brand-subtitle">Hostel Canteen Administration & Biometric Security</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/" class="btn btn-outline nav-link" title="Open Canteen Kiosk">
+                    <span>📷</span> Scanner Kiosk
+                </a>
+                <a href="/logout" class="btn btn-secondary nav-link">
+                    <span>🚪</span> Logout
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content container admin-container">
+        
+        <!-- Top Key Metrics Dashboard Ribbon -->
+        <section class="metrics-grid multi-metrics">
+            <div class="card metric-card">
+                <div class="metric-icon">👥</div>
+                <div class="metric-info">
+                    <span class="metric-label">Enrolled Students</span>
+                    <h3 class="metric-value" id="metricTotalStudents">0</h3>
+                </div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="metric-icon">🌅</div>
+                <div class="metric-info">
+                    <span class="metric-label">Breakfast Served</span>
+                    <h3 class="metric-value highlight-number" id="metricTodayBreakfast">0</h3>
+                </div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="metric-icon">🍲</div>
+                <div class="metric-info">
+                    <span class="metric-label">Lunch Served</span>
+                    <h3 class="metric-value highlight-number" id="metricTodayLunch">0</h3>
+                </div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="metric-icon">💰</div>
+                <div class="metric-info">
+                    <span class="metric-label">Fees Collected</span>
+                    <h3 class="metric-value text-success" id="metricFeesCollected">₹0</h3>
+                </div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="metric-icon">⚠️</div>
+                <div class="metric-info">
+                    <span class="metric-label">Pending Dues</span>
+                    <h3 class="metric-value text-danger" id="metricFeesPending">₹0</h3>
+                </div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="metric-icon">📱</div>
+                <div class="metric-info">
+                    <span class="metric-label">SMS Notifications</span>
+                    <h3 class="metric-value" id="metricSmsCount">0</h3>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Navigation Tabs -->
+        <div class="admin-nav-tabs">
+            <button class="nav-tab-btn active" onclick="switchAdminSection('students')">👥 Students & Biometrics</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('fees')">💳 Fee Management</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('menus')">🍲 Menus & Timings</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('attendance')">📊 Attendance & Rejections</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('reports')">📑 Excel Reports</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('sms')">📱 SMS Logs</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('audit')">📜 Audit Logs</button>
+            <button class="nav-tab-btn" onclick="switchAdminSection('config')">⚙️ Policy & Config</button>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 1: STUDENTS & BIOMETRICS -->
+        <!-- ============================================== -->
+        <div id="section-students" class="admin-section active">
+            <div class="admin-grid">
+                <!-- Registration Form -->
+                <section class="card registration-card">
+                    <div class="card-header">
+                        <h2 class="card-title">📝 Enroll Resident Student</h2>
+                        <span class="badge badge-neutral">Registration & Camera</span>
+                    </div>
+
+                    <form id="registerForm" class="registration-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="studentId">Student ID <span class="required">*</span></label>
+                                <input type="text" id="studentId" name="student_id" placeholder="e.g. 1XX23AIML001" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="studentName">Full Name <span class="required">*</span></label>
+                                <input type="text" id="studentName" name="name" placeholder="e.g. Tharun Kumar" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row three-cols">
+                            <div class="form-group">
+                                <label for="studentSrn">SRN / Roll No.</label>
+                                <input type="text" id="studentSrn" name="srn" placeholder="e.g. PES12023001">
+                            </div>
+                            <div class="form-group">
+                                <label for="studentPhone">Phone (10 digits) <span class="required">*</span></label>
+                                <input type="text" id="studentPhone" name="phone_number" placeholder="e.g. 9876543210" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="studentHostel">Hostel Name <span class="required">*</span></label>
+                                <input type="text" id="studentHostel" name="hostel" placeholder="e.g. Kaveri Hostel" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row three-cols">
+                            <div class="form-group">
+                                <label for="studentRoom">Room Number <span class="required">*</span></label>
+                                <input type="text" id="studentRoom" name="room_number" placeholder="e.g. 302" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="roomSharingType">Room Sharing</label>
+                                <select id="roomSharingType" name="room_sharing_type">
+                                    <option value="Single">Single Sharing</option>
+                                    <option value="Double" selected>Double Sharing</option>
+                                    <option value="Triple">Triple Sharing</option>
+                                    <option value="Four-Sharing">Four Sharing</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="roomOccupants">Occupants Count</label>
+                                <input type="number" id="roomOccupants" name="room_occupants" value="2" min="1" max="6">
+                            </div>
+                        </div>
+
+                        <div class="form-row three-cols">
+                            <div class="form-group">
+                                <label for="studentBranch">Branch</label>
+                                <select id="studentBranch" name="branch">
+                                    <option value="AIML">AIML</option>
+                                    <option value="CSE">CSE</option>
+                                    <option value="ISE">ISE</option>
+                                    <option value="ECE">ECE</option>
+                                    <option value="Mechanical">Mechanical</option>
+                                    <option value="Civil">Civil</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="studentYear">Year</label>
+                                <select id="studentYear" name="year">
+                                    <option value="1st Year">1st Year</option>
+                                    <option value="2nd Year">2nd Year</option>
+                                    <option value="3rd Year">3rd Year</option>
+                                    <option value="4th Year">4th Year</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="admissionDate">Admission Date</label>
+                                <input type="date" id="admissionDate" name="admission_date">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="totalHostelFees">Total Hostel Fee (₹)</label>
+                                <input type="number" id="totalHostelFees" name="total_hostel_fees" value="75000" step="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="initialFeesPaid">Initial Fees Paid (₹)</label>
+                                <input type="number" id="initialFeesPaid" name="total_fees_paid" value="0" step="500">
+                            </div>
+                        </div>
+
+                        <!-- Camera Capture Box -->
+                        <div class="registration-cam-section">
+                            <label class="section-label">📸 Biometric Face Enrollment (Webcam)</label>
+                            <p class="section-hint">Position student face inside frame and click "Capture Face Photo". Single face strictly required.</p>
+
+                            <div class="cam-preview-box">
+                                <div class="reg-viewport">
+                                    <video id="adminWebcam" autoplay playsinline muted></video>
+                                    <canvas id="adminCanvas" style="display: none;"></canvas>
+                                    <div class="face-guide">
+                                        <div class="target-corner tl"></div>
+                                        <div class="target-corner tr"></div>
+                                        <div class="target-corner bl"></div>
+                                        <div class="target-corner br"></div>
+                                    </div>
+                                </div>
+
+                                <div class="reg-snapshot-preview">
+                                    <span class="preview-label">Captured Biometric Snapshot:</span>
+                                    <div class="snapshot-display" id="snapshotDisplay">
+                                        <span class="no-snap-hint">No photo captured</span>
+                                        <img id="capturedImagePreview" src="" alt="Captured preview" style="display: none;">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="cam-action-buttons">
+                                <button type="button" id="captureFaceBtn" class="btn btn-secondary">
+                                    📸 Capture Face Photo
+                                </button>
+                                <button type="button" id="retakeFaceBtn" class="btn btn-outline" style="display: none;">
+                                    🔄 Retake Photo
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="regStatusAlert" class="alert-box" style="display: none;"></div>
+
+                        <button type="submit" id="submitRegisterBtn" class="btn btn-primary btn-large full-width">
+                            ✅ Register Student in System
+                        </button>
+                    </form>
+                </section>
+
+                <!-- Quick Actions Card -->
+                <section class="card quick-actions-card">
+                    <div class="card-header">
+                        <h2 class="card-title">⚡ Staff Manual Meal Verification</h2>
+                    </div>
+                    <p class="section-hint">Use this alternative workflow when camera hardware is unavailable or student face cannot be scanned.</p>
+                    <form id="manualVerifyForm">
+                        <div class="form-group">
+                            <label for="manualStudentId">Student ID or SRN</label>
+                            <input type="text" id="manualStudentId" placeholder="e.g. 1XX23AIML001" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualMealType">Meal Type</label>
+                            <select id="manualMealType">
+                                <option value="auto">Auto Detect from Time</option>
+                                <option value="Breakfast">Breakfast</option>
+                                <option value="Lunch">Lunch</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary full-width">
+                            Grant Staff Verified Meal Entry
+                        </button>
+                    </form>
+                    <div id="manualVerifyAlert" class="alert-box" style="display:none;margin-top:1rem;"></div>
+                </section>
+            </div>
+
+            <!-- Student Directory Table -->
+            <section class="card table-card" style="margin-top: 1.5rem;">
+                <div class="card-header flex-header">
+                    <div>
+                        <h2 class="card-title">👥 Resident Student Directory</h2>
+                        <p class="section-subtitle">Search, filter by room, fee clearance, and manage biometric profiles</p>
+                    </div>
+                    <div class="filters-bar">
+                        <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN...">
+                        <select id="filterFeeStatus">
+                            <option value="">All Fee Statuses</option>
+                            <option value="PAID">PAID</option>
+                            <option value="PARTIALLY PAID">PARTIALLY PAID</option>
+                            <option value="UNPAID">UNPAID</option>
+                        </select>
+                        <select id="filterActiveStatus">
+                            <option value="">All Statuses</option>
+                            <option value="true">Active Only</option>
+                            <option value="false">Inactive Only</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="data-table" id="studentsTable">
+                        <thead>
+                            <tr>
+                                <th>Photo</th>
+                                <th>ID / SRN</th>
+                                <th>Name</th>
+                                <th>Room</th>
+                                <th>Phone</th>
+                                <th>Fee Status</th>
+                                <th>Pending Dues</th>
+                                <th>Meal Access</th>
+                                <th>Biometrics</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studentsTableBody">
+                            <tr><td colspan="10" class="text-center">Loading students...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 2: HOSTEL FEE MANAGEMENT -->
+        <!-- ============================================== -->
+        <div id="section-fees" class="admin-section" style="display:none;">
+            <div class="admin-grid">
+                <!-- Record Payment Form -->
+                <section class="card fee-record-card">
+                    <div class="card-header">
+                        <h2 class="card-title">💵 Record Hostel Fee Payment</h2>
+                    </div>
+                    <form id="paymentRecordForm">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="payStudentId">Student ID or SRN <span class="required">*</span></label>
+                                <input type="text" id="payStudentId" placeholder="e.g. 1XX23AIML001" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="payAmount">Payment Amount (₹) <span class="required">*</span></label>
+                                <input type="number" id="payAmount" min="1" step="100" placeholder="e.g. 25000" required>
+                            </div>
+                        </div>
+                        <div class="form-row three-cols">
+                            <div class="form-group">
+                                <label for="payMethod">Payment Method</label>
+                                <select id="payMethod">
+                                    <option value="UPI">UPI (GooglePay/PhonePe)</option>
+                                    <option value="Net Banking">Net Banking / NEFT</option>
+                                    <option value="Demand Draft">Demand Draft</option>
+                                    <option value="Card">Credit/Debit Card</option>
+                                    <option value="Cash">Cash</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="payRef">Receipt / Bank Reference No.</label>
+                                <input type="text" id="payRef" placeholder="e.g. UPI-92817291">
+                            </div>
+                            <div class="form-group">
+                                <label for="payDate">Payment Date</label>
+                                <input type="date" id="payDate">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="payRemarks">Remarks</label>
+                            <input type="text" id="payRemarks" placeholder="e.g. 1st Semester Hostel Fee installment">
+                        </div>
+                        <button type="submit" class="btn btn-primary full-width">
+                            Record Payment & Update Balance
+                        </button>
+                    </form>
+                    <div id="paymentAlert" class="alert-box" style="display:none;margin-top:1rem;"></div>
+                </section>
+
+                <!-- Fee Overview Card -->
+                <section class="card fee-overview-card">
+                    <div class="card-header">
+                        <h2 class="card-title">📊 Fee Collection Status</h2>
+                    </div>
+                    <div class="fee-collection-summary">
+                        <div class="stat-bubble">
+                            <span class="stat-number" id="feeCountPaid">0</span>
+                            <span class="stat-label">Students Fully Paid</span>
+                        </div>
+                        <div class="stat-bubble">
+                            <span class="stat-number text-warning" id="feeCountPartial">0</span>
+                            <span class="stat-label">Partially Paid</span>
+                        </div>
+                        <div class="stat-bubble">
+                            <span class="stat-number text-danger" id="feeCountUnpaid">0</span>
+                            <span class="stat-label">Unpaid / Dues</span>
+                        </div>
+                    </div>
+                    <div class="fee-footer-note" style="margin-top:1.5rem;">
+                        <p>💡 Automatic calculation: <code>pending_fees = total_hostel_fees - total_fees_paid</code></p>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Student Fee Accounts Table -->
+            <section class="card table-card" style="margin-top: 1.5rem;">
+                <div class="card-header flex-header">
+                    <h2 class="card-title">💳 Student Fee Accounts Ledger</h2>
+                    <input type="text" id="feeSearchInput" placeholder="🔍 Filter student fee ledger...">
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Student ID</th>
+                                <th>Name</th>
+                                <th>Total Fee</th>
+                                <th>Fees Paid</th>
+                                <th>Pending Dues</th>
+                                <th>Status</th>
+                                <th>Last Paid Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="feeAccountsTableBody">
+                            <tr><td colspan="8" class="text-center">Loading fee accounts...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 3: MENUS & MEAL TIMINGS -->
+        <!-- ============================================== -->
+        <div id="section-menus" class="admin-section" style="display:none;">
+            <div class="admin-grid">
+                <!-- Breakfast Menu Card -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">🌅 Breakfast Menu & Schedule</h2>
+                    </div>
+                    <form id="bfMenuForm">
+                        <div class="form-group">
+                            <label for="bfMenuItems">Menu Items (comma-separated)</label>
+                            <textarea id="bfMenuItems" rows="4" style="width:100%;background:var(--bg-surface-elevated);color:white;border:1px solid var(--border-color);padding:0.5rem;border-radius:var(--radius-sm);"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="bfStartTime">Start Time (HH:MM)</label>
+                                <input type="time" id="bfStartTime" value="07:30">
+                            </div>
+                            <div class="form-group">
+                                <label for="bfEndTime">End Time (HH:MM)</label>
+                                <input type="time" id="bfEndTime" value="10:30">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary full-width">
+                            Publish Breakfast Menu & Timings
+                        </button>
+                    </form>
+                </section>
+
+                <!-- Lunch Menu Card -->
+                <section class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">☀️ Lunch Menu & Schedule</h2>
+                    </div>
+                    <form id="lunchMenuForm">
+                        <div class="form-group">
+                            <label for="lunchMenuItems">Menu Items (comma-separated)</label>
+                            <textarea id="lunchMenuItems" rows="4" style="width:100%;background:var(--bg-surface-elevated);color:white;border:1px solid var(--border-color);padding:0.5rem;border-radius:var(--radius-sm);"></textarea>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lunchStartTime">Start Time (HH:MM)</label>
+                                <input type="time" id="lunchStartTime" value="11:30">
+                            </div>
+                            <div class="form-group">
+                                <label for="lunchEndTime">End Time (HH:MM)</label>
+                                <input type="time" id="lunchEndTime" value="15:30">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary full-width">
+                            Publish Lunch Menu & Timings
+                        </button>
+                    </form>
+                </section>
+            </div>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 4: ATTENDANCE & REJECTIONS -->
+        <!-- ============================================== -->
+        <div id="section-attendance" class="admin-section" style="display:none;">
+            <!-- Today's Attendance Table -->
+            <section class="card table-card">
+                <div class="card-header flex-header">
+                    <div>
+                        <h2 class="card-title">🍲 Canteen Meal Attendance Log</h2>
+                        <p class="section-subtitle">Real-time attendance recorded via face biometrics and staff verification</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                        <input type="date" id="attendanceDateFilter" class="form-control" style="padding:0.35rem 0.6rem;font-size:0.85rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);" title="Filter attendance by date">
+                        <button id="refreshAttendanceBtn" class="btn btn-outline btn-small" type="button" onclick="loadAttendanceLogs()">🔄 Refresh Attendance</button>
+                        <button id="clearAttendanceBtn" class="btn btn-outline-danger btn-small" type="button" onclick="openClearRecordsModal('attendance')">🗑️ Clear Records</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th># Entry ID</th>
+                                <th>Time</th>
+                                <th>Student ID / SRN</th>
+                                <th>Name</th>
+                                <th>Room</th>
+                                <th>Meal Type</th>
+                                <th>Method</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="entriesTableBody">
+                            <tr><td colspan="8" class="text-center">Loading attendance entries...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Rejected Attempts Log -->
+            <section class="card table-card" style="margin-top:1.5rem;">
+                <div class="card-header flex-header">
+                    <div>
+                        <h2 class="card-title">⛔ Rejected Meal Attempts Log</h2>
+                        <p class="section-subtitle">Audit trail of denied canteen entries (Fee policy, Disabled access, Duplicate, Outside hours)</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                        <button id="refreshRejectedBtn" class="btn btn-outline btn-small" type="button" onclick="loadRejectedLogs()">🔄 Refresh Rejections</button>
+                        <button id="clearRejectedBtn" class="btn btn-outline-danger btn-small" type="button" onclick="openClearRecordsModal('rejections')">🗑️ Clear Records</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Date & Time</th>
+                                <th>Student ID</th>
+                                <th>Name</th>
+                                <th>Meal Type</th>
+                                <th>Rejection Reason</th>
+                                <th>Method</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rejectedTableBody">
+                            <tr><td colspan="6" class="text-center">Loading rejected attempts...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 5: EXCEL REPORTS -->
+        <!-- ============================================== -->
+        <div id="section-reports" class="admin-section" style="display:none;">
+            <section class="card">
+                <div class="card-header">
+                    <h2 class="card-title">📑 Daily Excel & CSV Attendance Report Generator</h2>
+                </div>
+                <p class="section-hint">Generates an automated daily workbook containing Student ID, Name, SRN, Room Number, Breakfast Time, Lunch Time, and Total Meals Taken.</p>
+                <div class="form-row" style="max-width: 600px; margin-top: 1rem;">
+                    <div class="form-group">
+                        <label for="reportDateInput">Select Report Date</label>
+                        <input type="date" id="reportDateInput">
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end;">
+                        <button id="generateReportBtn" class="btn btn-primary" onclick="generateDailyReport()">
+                            ⚙️ Generate Report
+                        </button>
+                    </div>
+                </div>
+
+                <div class="report-download-actions" style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+                    <button class="btn btn-secondary" onclick="downloadReport('xlsx')">
+                        📥 Download Excel (.xlsx)
+                    </button>
+                    <button class="btn btn-outline" onclick="downloadReport('csv')">
+                        📄 Download CSV (.csv)
+                    </button>
+                </div>
+                <div id="reportGenAlert" class="alert-box" style="display:none;margin-top:1rem;"></div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 6: SMS NOTIFICATION LOGS -->
+        <!-- ============================================== -->
+        <div id="section-sms" class="admin-section" style="display:none;">
+            <section class="card table-card">
+                <div class="card-header flex-header">
+                    <div>
+                        <h2 class="card-title">📱 SMS Notification Delivery Logs</h2>
+                        <p class="section-subtitle">Real-time SMS dispatch records sent to students after verified meals</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                        <button id="refreshSmsBtn" class="btn btn-outline btn-small" type="button" onclick="loadSmsLogs()">🔄 Refresh SMS Logs</button>
+                        <button id="clearSmsBtn" class="btn btn-outline-danger btn-small" type="button" onclick="openClearRecordsModal('sms')">🗑️ Clear Records</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Student ID</th>
+                                <th>Student Name</th>
+                                <th>Phone Number</th>
+                                <th>Meal Type</th>
+                                <th>Status</th>
+                                <th>Provider</th>
+                                <th>Reference</th>
+                            </tr>
+                        </thead>
+                        <tbody id="smsTableBody">
+                            <tr><td colspan="8" class="text-center">Loading SMS logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 7: AUDIT LOGS -->
+        <!-- ============================================== -->
+        <div id="section-audit" class="admin-section" style="display:none;">
+            <section class="card table-card">
+                <div class="card-header flex-header">
+                    <div>
+                        <h2 class="card-title">📜 Administrative Action Audit Trail</h2>
+                        <p class="section-subtitle">Immutable log of fee modifications, biometric enrollments, policy adjustments, and logins</p>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
+                        <button id="refreshAuditBtn" class="btn btn-outline btn-small" type="button" onclick="loadAuditLogs()">🔄 Refresh Audit Trail</button>
+                        <button id="clearAuditBtn" class="btn btn-outline-danger btn-small" type="button" onclick="openClearRecordsModal('audit')">🗑️ Clear Records</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Action</th>
+                                <th>Actor</th>
+                                <th>Target Type</th>
+                                <th>Target ID</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditTableBody">
+                            <tr><td colspan="6" class="text-center">Loading audit records...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- SECTION 8: CONFIGURATION & POLICY SETTINGS -->
+        <!-- ============================================== -->
+        <div id="section-config" class="admin-section" style="display:none;">
+            <div class="admin-grid">
+                <section class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">⚙️ Policy Enforcement Rules</h2>
+                    </div>
+                    <div class="settings-form">
+                        <div class="form-group">
+                            <label for="thresholdSlider">Face Recognition Threshold</label>
+                            <div class="slider-group">
+                                <input type="range" id="thresholdSlider" min="0.25" max="0.60" step="0.01" value="0.36">
+                                <span class="threshold-display" id="thresholdVal">0.36</span>
+                            </div>
+                            <small class="hint-text">OpenCV SFace standard: 0.363.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enforceMealHoursToggle">
+                                <span>Enforce Strict Meal Hours (Breakfast & Lunch)</span>
+                            </label>
+                            <small class="hint-text">When checked, meal scans outside serving windows are rejected.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enforceFeePolicyToggle">
+                                <span>Enforce Hostel Fee Policy</span>
+                            </label>
+                            <small class="hint-text">When checked, students with pending dues exceeding limit are denied meal entry.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="maxPermittedDues">Maximum Permitted Fee Balance (₹)</label>
+                            <input type="number" id="maxPermittedDues" value="5000" step="500">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="smsProviderSelect">Active SMS Provider</label>
+                            <select id="smsProviderSelect">
+                                <option value="mock">Mock Simulator (Free Console / Audit Log)</option>
+                                <option value="fast2sms">Fast2SMS (Indian Gateway)</option>
+                                <option value="twilio">Twilio</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="smsSenderIdInput">SMS Sender ID / Header</label>
+                            <input type="text" id="smsSenderIdInput" placeholder="e.g. HSTLFD (6 chars)" value="HSTLFD">
+                            <small class="hint-text">In India, TRAI regulations mandate a 6-letter approved Header/Sender ID (e.g. HSTLFD).</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="smsSenderPhoneInput">Twilio Sender Mobile Number</label>
+                            <input type="text" id="smsSenderPhoneInput" placeholder="e.g. +12025550143">
+                            <small class="hint-text">The registered sender phone number (used when provider is Twilio).</small>
+                        </div>
+
+                        <button id="saveConfigBtn" class="btn btn-primary full-width" onclick="saveSystemConfig()">
+                            Save Policy & SMS Configuration
+                        </button>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">🛠️ Developer & Reset Tools</h2>
+                    </div>
+                    <div class="dev-actions">
+                        <button class="btn btn-outline-danger full-width" onclick="resetTodayEntries()">
+                            🧹 Reset Today's Meal Attendance Records
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Student Payment History Modal -->
+        <div id="paymentHistoryModal" class="modal-backdrop" style="display:none;">
+            <div class="modal-box card">
+                <div class="card-header">
+                    <h3 class="card-title" id="modalStudentTitle">Payment History</h3>
+                    <button class="btn btn-outline btn-small" onclick="closePaymentModal()">✕</button>
+                </div>
+                <div class="table-responsive" style="max-height: 350px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th># ID</th>
+                                <th>Date</th>
+                                <th>Method</th>
+                                <th>Ref No.</th>
+                                <th>Amount (₹)</th>
+                                <th>Remarks</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalPaymentsBody">
+                            <tr><td colspan="7" class="text-center">Loading payments...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Clear & Archive Records Confirmation Modal -->
+        <div id="clearRecordsModal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="clearModalTitle">
+            <div class="modal-box card" style="max-width: 520px; width: 90%;">
+                <div class="card-header flex-header">
+                    <h3 class="card-title" id="clearModalTitle">🗑️ Clear Module Records</h3>
+                    <button class="btn btn-outline btn-small" type="button" onclick="closeClearRecordsModal()">✕</button>
+                </div>
+                <div style="padding: 1rem 0;">
+                    <div id="clearModalNotice" class="alert-box alert-warning" style="display:block; margin-bottom: 1rem; line-height: 1.5; font-size: 0.88rem;">
+                        <!-- Dynamic explanation injected via JS -->
+                    </div>
+                    <div class="form-group" id="clearDateGroup" style="display:none; margin-bottom: 1rem;">
+                        <label for="clearDateScope" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.3rem; display:block;">Target Date Scope</label>
+                        <select id="clearDateScope" class="form-control" style="width:100%; padding:0.5rem; background:var(--bg-surface-elevated); color:var(--text-primary); border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                            <option value="today">Today's Records Only</option>
+                            <option value="all">All Historical Records</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label for="clearReasonInput" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.3rem; display:block;">Reason for Clearing / Archiving</label>
+                        <input type="text" id="clearReasonInput" class="form-control" placeholder="e.g. End of semester archive / Testing reset" style="width:100%; padding:0.5rem; background:var(--bg-surface-elevated); color:var(--text-primary); border:1px solid var(--border-color); border-radius:var(--radius-sm);">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 1.25rem;">
+                        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.85rem; color:var(--text-primary);">
+                            <input type="checkbox" id="clearConfirmCheckbox" style="accent-color:var(--color-primary); width:16px; height:16px;">
+                            <span>I explicitly confirm that active records will be moved to the restricted archive.</span>
+                        </label>
+                    </div>
+                    <div id="clearModalAlert" class="alert-box" style="display:none; margin-bottom: 1rem;"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+                        <button type="button" class="btn btn-outline" onclick="closeClearRecordsModal()">Cancel</button>
+                        <button type="button" id="confirmClearBtn" class="btn btn-outline-danger" onclick="submitClearRecords()" disabled>
+                            Confirm & Archive
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="app-footer">
+        <p>AI-Powered Hostel Food Management System &bull; Advanced Canteen Biometrics & Accounts</p>
+    </footer>
+
+    <script src="/static/js/admin.js?v=2.2"></script>
+</body>
+</html>

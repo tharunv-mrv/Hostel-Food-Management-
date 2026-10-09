@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login | Hostel Food Management System</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="login-body">
+    <div class="login-wrapper">
+        <div class="login-card card">
+            <div class="login-brand">
+                <div class="brand-icon">🍽️</div>
+                <h2>Hostel Food Management</h2>
+                <p class="brand-subtitle">Smart Biometrics & Canteen Portal</p>
+            </div>
+
+            <!-- Role Selector Tabs -->
+            <div class="tab-selector">
+                <button type="button" class="tab-btn active" id="studentTabBtn" onclick="switchLoginTab('student')">
+                    🎓 Student Login
+                </button>
+                <button type="button" class="tab-btn" id="adminTabBtn" onclick="switchLoginTab('admin')">
+                    ⚙️ Admin Login
+                </button>
+            </div>
+
+            <div id="loginAlert" class="alert-box" style="display: none;"></div>
+
+            <!-- Student Login Form -->
+            <form id="studentLoginForm" class="login-form">
+                <div class="form-group">
+                    <label for="studentUsername">Student ID or SRN <span class="required">*</span></label>
+                    <input type="text" id="studentUsername" placeholder="e.g. 1XX23AIML001" required>
+                </div>
+                <div class="form-group">
+                    <label for="studentPassword">Password <span class="required">*</span></label>
+                    <input type="password" id="studentPassword" placeholder="Default: Student@123" required>
+                </div>
+                <button type="submit" id="studentSubmitBtn" class="btn btn-primary full-width">
+                    Sign In as Student
+                </button>
+                <p class="login-hint">💡 Default password for enrolled students is <code>Student@123</code></p>
+            </form>
+
+            <!-- Admin Login Form -->
+            <form id="adminLoginForm" class="login-form" style="display: none;">
+                <div class="form-group">
+                    <label for="adminUsername">Admin Username <span class="required">*</span></label>
+                    <input type="text" id="adminUsername" placeholder="e.g. admin" required>
+                </div>
+                <div class="form-group">
+                    <label for="adminPassword">Admin Password <span class="required">*</span></label>
+                    <input type="password" id="adminPassword" placeholder="e.g. Admin@123" required>
+                </div>
+                <button type="submit" id="adminSubmitBtn" class="btn btn-primary full-width">
+                    Sign In as Administrator
+                </button>
+                <p class="login-hint">💡 Default admin: <code>admin</code> / <code>Admin@123</code></p>
+            </form>
+
+            <div class="login-footer">
+                <a href="/" class="nav-back-link">← Go to Canteen Live Scanner</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentRole = 'student';
+
+        function switchLoginTab(role) {
+            currentRole = role;
+            const studentTab = document.getElementById('studentTabBtn');
+            const adminTab = document.getElementById('adminTabBtn');
+            const studentForm = document.getElementById('studentLoginForm');
+            const adminForm = document.getElementById('adminLoginForm');
+            const alertBox = document.getElementById('loginAlert');
+            alertBox.style.display = 'none';
+
+            if (role === 'student') {
+                studentTab.classList.add('active');
+                adminTab.classList.remove('active');
+                studentForm.style.display = 'block';
+                adminForm.style.display = 'none';
+            } else {
+                adminTab.classList.add('active');
+                studentTab.classList.remove('active');
+                adminForm.style.display = 'block';
+                studentForm.style.display = 'none';
+            }
+        }
+
+        async function handleLogin(e, role) {
+            e.preventDefault();
+            const alertBox = document.getElementById('loginAlert');
+            alertBox.style.display = 'none';
+
+            const username = role === 'admin' 
+                ? document.getElementById('adminUsername').value.trim()
+                : document.getElementById('studentUsername').value.trim();
+
+            const password = role === 'admin'
+                ? document.getElementById('adminPassword').value.trim()
+                : document.getElementById('studentPassword').value.trim();
+
+            const btn = role === 'admin' ? document.getElementById('adminSubmitBtn') : document.getElementById('studentSubmitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Verifying...';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role, username, password })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    window.location.href = data.redirect || (role === 'admin' ? '/admin' : '/student');
+                } else {
+                    alertBox.textContent = `❌ ${data.message || 'Login failed.'}`;
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.style.display = 'block';
+                }
+            } catch (err) {
+                alertBox.textContent = '❌ Network error during sign-in.';
+                alertBox.className = 'alert-box alert-danger';
+                alertBox.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = role === 'admin' ? 'Sign In as Administrator' : 'Sign In as Student';
+            }
+        }
+
+        document.getElementById('studentLoginForm').addEventListener('submit', (e) => handleLogin(e, 'student'));
+        document.getElementById('adminLoginForm').addEventListener('submit', (e) => handleLogin(e, 'admin'));
+    </script>
+</body>
+</html>
