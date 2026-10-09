@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: hostel-food-management
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: RECOGNITION_THRESHOLD
+        value: "0.363"
+      - key: TIMEZONE
+        value: Asia/Kolkata
+      - key: BREAKFAST_START_TIME
+        value: "07:30"
+      - key: BREAKFAST_END_TIME
+        value: "10:30"
+      - key: BREAKFAST_ENABLED
+        value: "true"
+      - key: LUNCH_START_TIME
+        value: "11:30"
+      - key: LUNCH_END_TIME
+        value: "15:30"
+      - key: LUNCH_ENABLED
+        value: "true"
+      - key: ENFORCE_MEAL_HOURS
+        value: "false"
+      - key: FEE_POLICY_ENFORCED
+        value: "false"
+      - key: SMS_PROVIDER
+        value: mock

@@ -1,6 +1,31 @@
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Python bytecode & cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local databases & environment secrets
 instance/*.db
 .env
+.env.local
+
+# Operating system artifacts
 .DS_Store
+Thumbs.db
+
+# Generated spreadsheets & reports (auto-regenerated on-demand)
+reports/*.xlsx
+reports/*.csv
+reports/*.pdf
+
+# Local log files
+*.log
+
+# DO NOT ignore models directory (biometric ONNX weights required)
+!models/
+!models/*.onnx

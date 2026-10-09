@@ -498,49 +498,50 @@ def migrate_database(app):
 
         # 2. Check and migrate columns on SQLite tables
         try:
-            conn = db.engine.raw_connection()
-            cur = conn.cursor()
+            if db.engine.dialect.name == 'sqlite':
+                conn = db.engine.raw_connection()
+                cur = conn.cursor()
 
-            # Check students columns
-            cur.execute("PRAGMA table_info(students);")
-            existing_student_cols = {row[1] for row in cur.fetchall()}
+                # Check students columns
+                cur.execute("PRAGMA table_info(students);")
+                existing_student_cols = {row[1] for row in cur.fetchall()}
 
-            student_migrations = [
-                ("srn", "VARCHAR(50)"),
-                ("phone_number", "VARCHAR(20)"),
-                ("room_number", "VARCHAR(20)"),
-                ("room_sharing_type", "VARCHAR(30) DEFAULT 'Double'"),
-                ("room_occupants", "INTEGER DEFAULT 2"),
-                ("admission_date", "VARCHAR(15)"),
-                ("total_hostel_fees", "FLOAT DEFAULT 75000.0"),
-                ("total_fees_paid", "FLOAT DEFAULT 0.0"),
-                ("last_payment_date", "VARCHAR(15)"),
-                ("meal_access_enabled", "BOOLEAN DEFAULT 1"),
-                ("meal_restriction_reason", "VARCHAR(255) DEFAULT 'None'"),
-                ("password_hash", "VARCHAR(255)")
-            ]
+                student_migrations = [
+                    ("srn", "VARCHAR(50)"),
+                    ("phone_number", "VARCHAR(20)"),
+                    ("room_number", "VARCHAR(20)"),
+                    ("room_sharing_type", "VARCHAR(30) DEFAULT 'Double'"),
+                    ("room_occupants", "INTEGER DEFAULT 2"),
+                    ("admission_date", "VARCHAR(15)"),
+                    ("total_hostel_fees", "FLOAT DEFAULT 75000.0"),
+                    ("total_fees_paid", "FLOAT DEFAULT 0.0"),
+                    ("last_payment_date", "VARCHAR(15)"),
+                    ("meal_access_enabled", "BOOLEAN DEFAULT 1"),
+                    ("meal_restriction_reason", "VARCHAR(255) DEFAULT 'None'"),
+                    ("password_hash", "VARCHAR(255)")
+                ]
 
-            for col_name, col_def in student_migrations:
-                if col_name not in existing_student_cols:
-                    cur.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_def};")
+                for col_name, col_def in student_migrations:
+                    if col_name not in existing_student_cols:
+                        cur.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_def};")
 
-            # Check food_entries columns
-            cur.execute("PRAGMA table_info(food_entries);")
-            existing_food_cols = {row[1] for row in cur.fetchall()}
+                # Check food_entries columns
+                cur.execute("PRAGMA table_info(food_entries);")
+                existing_food_cols = {row[1] for row in cur.fetchall()}
 
-            food_migrations = [
-                ("srn", "VARCHAR(50)"),
-                ("room_number", "VARCHAR(20)"),
-                ("timestamp", "DATETIME"),
-                ("verification_method", "VARCHAR(20) DEFAULT 'face'")
-            ]
+                food_migrations = [
+                    ("srn", "VARCHAR(50)"),
+                    ("room_number", "VARCHAR(20)"),
+                    ("timestamp", "DATETIME"),
+                    ("verification_method", "VARCHAR(20) DEFAULT 'face'")
+                ]
 
-            for col_name, col_def in food_migrations:
-                if col_name not in existing_food_cols:
-                    cur.execute(f"ALTER TABLE food_entries ADD COLUMN {col_name} {col_def};")
+                for col_name, col_def in food_migrations:
+                    if col_name not in existing_food_cols:
+                        cur.execute(f"ALTER TABLE food_entries ADD COLUMN {col_name} {col_def};")
 
-            conn.commit()
-            conn.close()
+                conn.commit()
+                conn.close()
         except Exception as e:
             print(f"[Migration] Note during table column verification: {e}")
 

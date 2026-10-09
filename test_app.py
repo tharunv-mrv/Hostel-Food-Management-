@@ -859,6 +859,24 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
         res_purge_audit = self.client.post('/api/audit/logs/clear', json={'action': 'purge'})
         self.assertEqual(res_purge_audit.status_code, 403)
 
+    def test_36_health_check_endpoints(self):
+        """TEST 36: Production health check endpoints return healthy status and diagnostic information."""
+        # Root health check endpoint
+        res = self.client.get('/health')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data.get('status'), 'healthy')
+        self.assertIn('models_loaded', data)
+        self.assertIn('database', data)
+
+        # API health check endpoint
+        res_api = self.client.get('/api/health')
+        self.assertEqual(res_api.status_code, 200)
+        data_api = res_api.get_json()
+        self.assertEqual(data_api.get('status'), 'healthy')
+        self.assertEqual(data_api.get('database'), 'sqlite')
+
 
 if __name__ == '__main__':
     unittest.main()
+

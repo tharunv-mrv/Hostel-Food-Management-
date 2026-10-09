@@ -5,11 +5,19 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 class Config:
     """Application configuration with environment variable support."""
     SECRET_KEY = os.environ.get('SECRET_KEY', 'hostel-canteen-super-secret-key-2026')
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        'DATABASE_URL', 
-        f"sqlite:///{os.path.join(basedir, 'instance', 'hostel_food.db')}"
-    )
+
+    # Normalize DATABASE_URL for SQLAlchemy (Render provides postgres://, SQLAlchemy requires postgresql://)
+    raw_db_url = os.environ.get('DATABASE_URL')
+    if raw_db_url and raw_db_url.startswith('postgres://'):
+        raw_db_url = raw_db_url.replace('postgres://', 'postgresql://', 1)
+    
+    SQLALCHEMY_DATABASE_URI = raw_db_url or f"sqlite:///{os.path.join(basedir, 'instance', 'hostel_food.db')}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Production Session Cookie Security
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
     
     # Initial Admin Credentials
     DEFAULT_ADMIN_USERNAME = os.environ.get('DEFAULT_ADMIN_USERNAME', 'admin')

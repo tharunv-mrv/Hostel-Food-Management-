@@ -4,6 +4,7 @@ from datetime import datetime, time
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, current_app, session, redirect, url_for, send_file
 from werkzeug.security import generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from models import (
@@ -149,6 +150,23 @@ def validate_meal_eligibility(student, meal_type):
 
 def register_routes(app):
     """Register all web routes, APIs, and view endpoints."""
+
+    # ------------------------------------------
+    # HEALTH CHECK & SYSTEM MONITORING
+    # ------------------------------------------
+
+    @app.route('/health', methods=['GET'])
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        """Service health-check endpoint for cloud load balancers and deployment probes."""
+        models_loaded = bool(face_service.detector is not None and face_service.recognizer is not None)
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'service': 'Hostel Food Management System',
+            'models_loaded': models_loaded,
+            'database': db.engine.dialect.name
+        }), 200
 
     # ------------------------------------------
     # PAGE ROUTES
@@ -1474,12 +1492,17 @@ def create_app(test_config=None):
     return app
 
 
-# Default application instance for standard execution
+# Default application instance for standard execution (e.g. Gunicorn: app:app)
 app = create_app()
+
+# Enable reverse-proxy header support for Render/cloud deployments
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 
 if __name__ == '__main__':
-    print("AI-Powered Hostel Food Management System running at http://127.0.0.1:5000")
-    print("Admin portal available at http://127.0.0.1:5000/admin")
-    print("Student portal available at http://127.0.0.1:5000/student")
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 'yes')
+    print(f"AI-Powered Hostel Food Management System running on http://0.0.0.0:{port}")
+    print(f"Admin portal available at http://0.0.0.0:{port}/admin")
+    print(f"Student portal available at http://0.0.0.0:{port}/student")
+    app.run(host='0.0.0.0', port=port, debug=debug)
