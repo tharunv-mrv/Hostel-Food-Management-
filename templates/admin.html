@@ -10,27 +10,29 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <header class="app-header">
+    <a href="#admin-main" class="skip-link">Skip to administrator dashboard</a>
+
+    <header class="app-header" role="banner">
         <div class="header-container">
             <div class="brand">
-                <div class="brand-icon">⚙️</div>
+                <div class="brand-icon" aria-hidden="true">⚙️</div>
                 <div>
                     <h1 class="brand-title">Admin Management Portal</h1>
                     <p class="brand-subtitle">Hostel Canteen Administration & Biometric Security</p>
                 </div>
             </div>
-            <div class="header-actions">
+            <nav class="header-actions" aria-label="Portal Navigation">
                 <a href="/" class="btn btn-outline nav-link" title="Open Canteen Kiosk">
-                    <span>📷</span> Scanner Kiosk
+                    <span aria-hidden="true">📷</span> Scanner Kiosk
                 </a>
                 <a href="/logout" class="btn btn-secondary nav-link">
-                    <span>🚪</span> Logout
+                    <span aria-hidden="true">🚪</span> Logout
                 </a>
-            </div>
+            </nav>
         </div>
     </header>
 
-    <main class="main-content container admin-container">
+    <main id="admin-main" class="main-content container admin-container" role="main">
         
         <!-- Top Key Metrics Dashboard Ribbon -->
         <section class="metrics-grid multi-metrics">
@@ -84,21 +86,21 @@
         </section>
 
         <!-- Main Navigation Tabs -->
-        <div class="admin-nav-tabs">
-            <button class="nav-tab-btn active" onclick="switchAdminSection('students')">👥 Students & Biometrics</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('fees')">💳 Fee Management</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('menus')">🍲 Menus & Timings</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('attendance')">📊 Attendance & Rejections</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('reports')">📑 Excel Reports</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('sms')">📱 SMS Logs</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('audit')">📜 Audit Logs</button>
-            <button class="nav-tab-btn" onclick="switchAdminSection('config')">⚙️ Policy & Config</button>
+        <div class="admin-nav-tabs" role="tablist" aria-label="Administrator management modules">
+            <button class="nav-tab-btn active" id="tab-btn-students" role="tab" aria-selected="true" aria-controls="section-students" tabindex="0" onclick="switchAdminSection('students')">👥 Students & Biometrics</button>
+            <button class="nav-tab-btn" id="tab-btn-fees" role="tab" aria-selected="false" aria-controls="section-fees" tabindex="-1" onclick="switchAdminSection('fees')">💳 Fee Management</button>
+            <button class="nav-tab-btn" id="tab-btn-menus" role="tab" aria-selected="false" aria-controls="section-menus" tabindex="-1" onclick="switchAdminSection('menus')">🍲 Menus & Timings</button>
+            <button class="nav-tab-btn" id="tab-btn-attendance" role="tab" aria-selected="false" aria-controls="section-attendance" tabindex="-1" onclick="switchAdminSection('attendance')">📊 Attendance & Rejections</button>
+            <button class="nav-tab-btn" id="tab-btn-reports" role="tab" aria-selected="false" aria-controls="section-reports" tabindex="-1" onclick="switchAdminSection('reports')">📑 Excel Reports</button>
+            <button class="nav-tab-btn" id="tab-btn-sms" role="tab" aria-selected="false" aria-controls="section-sms" tabindex="-1" onclick="switchAdminSection('sms')">📱 SMS Logs</button>
+            <button class="nav-tab-btn" id="tab-btn-audit" role="tab" aria-selected="false" aria-controls="section-audit" tabindex="-1" onclick="switchAdminSection('audit')">📜 Audit Logs</button>
+            <button class="nav-tab-btn" id="tab-btn-config" role="tab" aria-selected="false" aria-controls="section-config" tabindex="-1" onclick="switchAdminSection('config')">⚙️ Policy & Config</button>
         </div>
 
         <!-- ============================================== -->
         <!-- SECTION 1: STUDENTS & BIOMETRICS -->
         <!-- ============================================== -->
-        <div id="section-students" class="admin-section active">
+        <div id="section-students" class="admin-section active" role="tabpanel" aria-labelledby="tab-btn-students">
             <div class="admin-grid">
                 <!-- Registration Form -->
                 <section class="card registration-card">
@@ -271,14 +273,14 @@
                         <p class="section-subtitle">Search, filter by room, fee clearance, and manage biometric profiles</p>
                     </div>
                     <div class="filters-bar">
-                        <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN...">
-                        <select id="filterFeeStatus">
+                        <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN..." aria-label="Search students by name, ID, or SRN">
+                        <select id="filterFeeStatus" aria-label="Filter students by fee status">
                             <option value="">All Fee Statuses</option>
                             <option value="PAID">PAID</option>
                             <option value="PARTIALLY PAID">PARTIALLY PAID</option>
                             <option value="UNPAID">UNPAID</option>
                         </select>
-                        <select id="filterActiveStatus">
+                        <select id="filterActiveStatus" aria-label="Filter students by active status">
                             <option value="">All Statuses</option>
                             <option value="true">Active Only</option>
                             <option value="false">Inactive Only</option>
@@ -288,18 +290,19 @@
 
                 <div class="table-responsive">
                     <table class="data-table" id="studentsTable">
+                        <caption class="sr-only">Resident Student Directory</caption>
                         <thead>
                             <tr>
-                                <th>Photo</th>
-                                <th>ID / SRN</th>
-                                <th>Name</th>
-                                <th>Room</th>
-                                <th>Phone</th>
-                                <th>Fee Status</th>
-                                <th>Pending Dues</th>
-                                <th>Meal Access</th>
-                                <th>Biometrics</th>
-                                <th>Actions</th>
+                                <th scope="col">Photo</th>
+                                <th scope="col">ID / SRN</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Room</th>
+                                <th scope="col">Phone</th>
+                                <th scope="col">Fee Status</th>
+                                <th scope="col">Pending Dues</th>
+                                <th scope="col">Meal Access</th>
+                                <th scope="col">Biometrics</th>
+                                <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="studentsTableBody">
@@ -313,7 +316,7 @@
         <!-- ============================================== -->
         <!-- SECTION 2: HOSTEL FEE MANAGEMENT -->
         <!-- ============================================== -->
-        <div id="section-fees" class="admin-section" style="display:none;">
+        <div id="section-fees" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-fees">
             <div class="admin-grid">
                 <!-- Record Payment Form -->
                 <section class="card fee-record-card">
@@ -391,20 +394,21 @@
             <section class="card table-card" style="margin-top: 1.5rem;">
                 <div class="card-header flex-header">
                     <h2 class="card-title">💳 Student Fee Accounts Ledger</h2>
-                    <input type="text" id="feeSearchInput" placeholder="🔍 Filter student fee ledger...">
+                    <input type="text" id="feeSearchInput" placeholder="🔍 Filter student fee ledger..." aria-label="Filter student fee accounts ledger">
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
+                        <caption class="sr-only">Student Fee Accounts Ledger</caption>
                         <thead>
                             <tr>
-                                <th>Student ID</th>
-                                <th>Name</th>
-                                <th>Total Fee</th>
-                                <th>Fees Paid</th>
-                                <th>Pending Dues</th>
-                                <th>Status</th>
-                                <th>Last Paid Date</th>
-                                <th>Actions</th>
+                                <th scope="col">Student ID</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Total Fee</th>
+                                <th scope="col">Fees Paid</th>
+                                <th scope="col">Pending Dues</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Last Paid Date</th>
+                                <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="feeAccountsTableBody">
@@ -418,7 +422,7 @@
         <!-- ============================================== -->
         <!-- SECTION 3: MENUS & MEAL TIMINGS -->
         <!-- ============================================== -->
-        <div id="section-menus" class="admin-section" style="display:none;">
+        <div id="section-menus" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-menus">
             <div class="admin-grid">
                 <!-- Breakfast Menu Card -->
                 <section class="card">
@@ -477,7 +481,7 @@
         <!-- ============================================== -->
         <!-- SECTION 4: ATTENDANCE & REJECTIONS -->
         <!-- ============================================== -->
-        <div id="section-attendance" class="admin-section" style="display:none;">
+        <div id="section-attendance" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-attendance">
             <!-- Today's Attendance Table -->
             <section class="card table-card">
                 <div class="card-header flex-header">
@@ -486,23 +490,24 @@
                         <p class="section-subtitle">Real-time attendance recorded via face biometrics and staff verification</p>
                     </div>
                     <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;">
-                        <input type="date" id="attendanceDateFilter" class="form-control" style="padding:0.35rem 0.6rem;font-size:0.85rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);" title="Filter attendance by date">
+                        <input type="date" id="attendanceDateFilter" class="form-control" style="padding:0.35rem 0.6rem;font-size:0.85rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);" aria-label="Filter attendance by date" title="Filter attendance by date">
                         <button id="refreshAttendanceBtn" class="btn btn-outline btn-small" type="button" onclick="loadAttendanceLogs()">🔄 Refresh Attendance</button>
                         <button id="clearAttendanceBtn" class="btn btn-outline-danger btn-small" type="button" onclick="openClearRecordsModal('attendance')">🗑️ Clear Records</button>
                     </div>
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
+                        <caption class="sr-only">Canteen Meal Attendance Records</caption>
                         <thead>
                             <tr>
-                                <th># Entry ID</th>
-                                <th>Time</th>
-                                <th>Student ID / SRN</th>
-                                <th>Name</th>
-                                <th>Room</th>
-                                <th>Meal Type</th>
-                                <th>Method</th>
-                                <th>Status</th>
+                                <th scope="col"># Entry ID</th>
+                                <th scope="col">Time</th>
+                                <th scope="col">Student ID / SRN</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Room</th>
+                                <th scope="col">Meal Type</th>
+                                <th scope="col">Method</th>
+                                <th scope="col">Status</th>
                             </tr>
                         </thead>
                         <tbody id="entriesTableBody">
@@ -526,14 +531,15 @@
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
+                        <caption class="sr-only">Rejected Meal Attempts Log</caption>
                         <thead>
                             <tr>
-                                <th>Date & Time</th>
-                                <th>Student ID</th>
-                                <th>Name</th>
-                                <th>Meal Type</th>
-                                <th>Rejection Reason</th>
-                                <th>Method</th>
+                                <th scope="col">Date & Time</th>
+                                <th scope="col">Student ID</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Meal Type</th>
+                                <th scope="col">Rejection Reason</th>
+                                <th scope="col">Method</th>
                             </tr>
                         </thead>
                         <tbody id="rejectedTableBody">
@@ -547,7 +553,7 @@
         <!-- ============================================== -->
         <!-- SECTION 5: EXCEL REPORTS -->
         <!-- ============================================== -->
-        <div id="section-reports" class="admin-section" style="display:none;">
+        <div id="section-reports" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-reports">
             <section class="card">
                 <div class="card-header">
                     <h2 class="card-title">📑 Daily Excel & CSV Attendance Report Generator</h2>
@@ -580,7 +586,7 @@
         <!-- ============================================== -->
         <!-- SECTION 6: SMS NOTIFICATION LOGS -->
         <!-- ============================================== -->
-        <div id="section-sms" class="admin-section" style="display:none;">
+        <div id="section-sms" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-sms">
             <section class="card table-card">
                 <div class="card-header flex-header">
                     <div>
@@ -594,16 +600,17 @@
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
+                        <caption class="sr-only">SMS Notification Delivery Records</caption>
                         <thead>
                             <tr>
-                                <th>Timestamp</th>
-                                <th>Student ID</th>
-                                <th>Student Name</th>
-                                <th>Phone Number</th>
-                                <th>Meal Type</th>
-                                <th>Status</th>
-                                <th>Provider</th>
-                                <th>Reference</th>
+                                <th scope="col">Timestamp</th>
+                                <th scope="col">Student ID</th>
+                                <th scope="col">Student Name</th>
+                                <th scope="col">Phone Number</th>
+                                <th scope="col">Meal Type</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Provider</th>
+                                <th scope="col">Reference</th>
                             </tr>
                         </thead>
                         <tbody id="smsTableBody">
@@ -617,7 +624,7 @@
         <!-- ============================================== -->
         <!-- SECTION 7: AUDIT LOGS -->
         <!-- ============================================== -->
-        <div id="section-audit" class="admin-section" style="display:none;">
+        <div id="section-audit" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-audit">
             <section class="card table-card">
                 <div class="card-header flex-header">
                     <div>
@@ -631,14 +638,15 @@
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
+                        <caption class="sr-only">System Audit Trail Records</caption>
                         <thead>
                             <tr>
-                                <th>Timestamp</th>
-                                <th>Action</th>
-                                <th>Actor</th>
-                                <th>Target Type</th>
-                                <th>Target ID</th>
-                                <th>Details</th>
+                                <th scope="col">Timestamp</th>
+                                <th scope="col">Action</th>
+                                <th scope="col">Actor</th>
+                                <th scope="col">Target Type</th>
+                                <th scope="col">Target ID</th>
+                                <th scope="col">Details</th>
                             </tr>
                         </thead>
                         <tbody id="auditTableBody">
@@ -652,7 +660,7 @@
         <!-- ============================================== -->
         <!-- SECTION 8: CONFIGURATION & POLICY SETTINGS -->
         <!-- ============================================== -->
-        <div id="section-config" class="admin-section" style="display:none;">
+        <div id="section-config" class="admin-section" style="display:none;" role="tabpanel" aria-labelledby="tab-btn-config">
             <div class="admin-grid">
                 <section class="card">
                     <div class="card-header">
@@ -669,7 +677,7 @@
                         </div>
 
                         <div class="form-group">
-                            <label class="checkbox-label">
+                            <label class="checkbox-label" for="enforceMealHoursToggle">
                                 <input type="checkbox" id="enforceMealHoursToggle">
                                 <span>Enforce Strict Meal Hours (Breakfast & Lunch)</span>
                             </label>
@@ -677,7 +685,7 @@
                         </div>
 
                         <div class="form-group">
-                            <label class="checkbox-label">
+                            <label class="checkbox-label" for="enforceFeePolicyToggle">
                                 <input type="checkbox" id="enforceFeePolicyToggle">
                                 <span>Enforce Hostel Fee Policy</span>
                             </label>
@@ -730,23 +738,24 @@
         </div>
 
         <!-- Student Payment History Modal -->
-        <div id="paymentHistoryModal" class="modal-backdrop" style="display:none;">
+        <div id="paymentHistoryModal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modalStudentTitle">
             <div class="modal-box card">
                 <div class="card-header">
                     <h3 class="card-title" id="modalStudentTitle">Payment History</h3>
-                    <button class="btn btn-outline btn-small" onclick="closePaymentModal()">✕</button>
+                    <button class="btn btn-outline btn-small" type="button" onclick="closePaymentModal()" aria-label="Close payment history dialog">✕</button>
                 </div>
                 <div class="table-responsive" style="max-height: 350px;">
                     <table class="data-table">
+                        <caption class="sr-only">Student Fee Payment Receipts</caption>
                         <thead>
                             <tr>
-                                <th># ID</th>
-                                <th>Date</th>
-                                <th>Method</th>
-                                <th>Ref No.</th>
-                                <th>Amount (₹)</th>
-                                <th>Remarks</th>
-                                <th>Action</th>
+                                <th scope="col"># ID</th>
+                                <th scope="col">Date</th>
+                                <th scope="col">Method</th>
+                                <th scope="col">Ref No.</th>
+                                <th scope="col">Amount (₹)</th>
+                                <th scope="col">Remarks</th>
+                                <th scope="col">Action</th>
                             </tr>
                         </thead>
                         <tbody id="modalPaymentsBody">
@@ -762,7 +771,7 @@
             <div class="modal-box card" style="max-width: 520px; width: 90%;">
                 <div class="card-header flex-header">
                     <h3 class="card-title" id="clearModalTitle">🗑️ Clear Module Records</h3>
-                    <button class="btn btn-outline btn-small" type="button" onclick="closeClearRecordsModal()">✕</button>
+                    <button class="btn btn-outline btn-small" type="button" onclick="closeClearRecordsModal()" aria-label="Close clear records dialog">✕</button>
                 </div>
                 <div style="padding: 1rem 0;">
                     <div id="clearModalNotice" class="alert-box alert-warning" style="display:block; margin-bottom: 1rem; line-height: 1.5; font-size: 0.88rem;">

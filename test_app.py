@@ -1,6 +1,6 @@
 """
 AI-POWERED HOSTEL FOOD MANAGEMENT SYSTEM
-Automated Acceptance Criteria Test Suite (TEST 1 to TEST 20)
+Automated Acceptance Criteria Test Suite (TEST 1 to TEST 40)
 
 Test Scenarios:
 TEST 1: An administrator can log in and manage students.
@@ -23,6 +23,26 @@ TEST 17: Fee calculations remain correct when payments are corrected or reversed
 TEST 18: Simultaneous attendance requests do not produce duplicate entries.
 TEST 19: Daily reports can be regenerated safely without corrupting historical data.
 TEST 20: Sensitive administrative actions are recorded in the audit log.
+TEST 21: Attendance logs and rejected logs endpoints return accurate data.
+TEST 22: Excel formula injection sanitization prevents spreadsheet calculation exploits.
+TEST 23: Excel export creates multi-worksheet reports (Breakfast & Lunch).
+TEST 24: SMS service idempotency prevents duplicate notifications.
+TEST 25: Face recognition API enforces quality metrics and 5-point landmark detection.
+TEST 26: Student phone numbers are masked for data privacy.
+TEST 27: Dashboard refresh endpoints return consistent, isolated data.
+TEST 28: Refresh operation never modifies or purges existing records.
+TEST 29: Clear endpoints require explicit administrator authentication and authorization.
+TEST 30: Clearing attendance archives records while preserving students and fee accounts.
+TEST 31: Clearing rejections moves logs to archive while preserving successful attendance.
+TEST 32: Clearing SMS logs archives historical records without dropping queued dispatches.
+TEST 33: Clearing audit trail creates an immutable retention log entry.
+TEST 34: Unified clear router and archive inspection endpoints operate securely.
+TEST 35: Permanent deletion is blocked under default data retention policies.
+TEST 36: Health check endpoints return system health and service readiness.
+TEST 37: Templates contain accessibility landmarks, skip links, table captions, and ARIA roles.
+TEST 38: HTTP responses enforce defense-in-depth security headers and CSRF endpoint returns token.
+TEST 39: Sensitive endpoints enforce sliding-window rate limiting when enabled.
+TEST 40: Custom error handlers sanitize 404, 403, and 400 API responses without leaking internals.
 """
 
 import unittest
@@ -875,6 +895,118 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
         data_api = res_api.get_json()
         self.assertEqual(data_api.get('status'), 'healthy')
         self.assertEqual(data_api.get('database'), 'sqlite')
+
+    def test_37_accessibility_landmarks_and_skip_link(self):
+        """TEST 37: Templates contain accessibility landmarks, skip links, table captions, and ARIA roles."""
+        # 1. Login page
+        res_login = self.client.get('/login')
+        self.assertEqual(res_login.status_code, 200)
+        self.assertIn(b'class="skip-link"', res_login.data)
+        self.assertIn(b'role="tablist"', res_login.data)
+        self.assertIn(b'aria-selected="true"', res_login.data)
+        self.assertIn(b'id="login-main"', res_login.data)
+
+        # 2. Main scanner page
+        res_index = self.client.get('/')
+        self.assertEqual(res_index.status_code, 200)
+        self.assertIn(b'class="skip-link"', res_index.data)
+        self.assertIn(b'role="banner"', res_index.data)
+        self.assertIn(b'role="radiogroup"', res_index.data)
+        self.assertIn(b'id="manualEntryModal"', res_index.data)
+        self.assertIn(b'role="dialog"', res_index.data)
+
+        # 3. Admin portal
+        self._login_as_admin()
+        res_admin = self.client.get('/admin')
+        self.assertEqual(res_admin.status_code, 200)
+        self.assertIn(b'class="skip-link"', res_admin.data)
+        self.assertIn(b'role="tablist"', res_admin.data)
+        self.assertIn(b'role="tabpanel"', res_admin.data)
+        self.assertIn(b'<caption class="sr-only">', res_admin.data)
+        self.assertIn(b'scope="col"', res_admin.data)
+
+        # 4. Student portal
+        self.client.get('/api/auth/logout')
+        self._create_test_student("STU_A11Y")
+        self.client.post('/api/auth/login', json={'role': 'student', 'username': 'STU_A11Y', 'password': 'Student@123'})
+        res_student = self.client.get('/student')
+        self.assertEqual(res_student.status_code, 200)
+        self.assertIn(b'class="skip-link"', res_student.data)
+        self.assertIn(b'role="tablist"', res_student.data)
+        self.assertIn(b'<caption class="sr-only">', res_student.data)
+
+    def test_38_security_headers_and_csrf_endpoint(self):
+        """TEST 38: HTTP responses enforce defense-in-depth security headers and CSRF endpoint returns valid token."""
+        res = self.client.get('/login')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(res.headers.get('X-Frame-Options'), 'SAMEORIGIN')
+        self.assertEqual(res.headers.get('X-XSS-Protection'), '1; mode=block')
+        self.assertEqual(res.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+
+        # CSRF token endpoint
+        res_csrf = self.client.get('/api/auth/csrf')
+        self.assertEqual(res_csrf.status_code, 200)
+        data = res_csrf.get_json()
+        self.assertTrue(data.get('success'))
+        csrf_tok = data.get('csrf_token')
+        self.assertIsNotNone(csrf_tok)
+        self.assertEqual(len(csrf_tok), 64)
+
+    def test_39_rate_limiting_enforcement(self):
+        """TEST 39: Sensitive endpoints enforce sliding-window rate limiting when enabled."""
+        from app import _rate_limit_records
+        _rate_limit_records.clear()
+
+        # Create isolated app instance with rate limiting enabled and testing flag false
+        rl_app = create_app({
+            'TESTING': False,
+            'RATE_LIMIT_ENABLED': True,
+            'CSRF_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SQLALCHEMY_ENGINE_OPTIONS': {
+                'poolclass': StaticPool,
+                'connect_args': {'check_same_thread': False}
+            },
+            'SECRET_KEY': 'rl-secret'
+        })
+        with rl_app.app_context():
+            db.create_all()
+            with rl_app.test_client() as client:
+                # Login limit is 25 per minute; verify that 26th request receives 429
+                for _ in range(25):
+                    client.post('/api/auth/login', json={'role': 'admin', 'username': 'fake', 'password': 'bad'})
+                res_blocked = client.post('/api/auth/login', json={'role': 'admin', 'username': 'fake', 'password': 'bad'})
+                self.assertEqual(res_blocked.status_code, 429)
+                data = res_blocked.get_json()
+                self.assertFalse(data.get('success'))
+                self.assertEqual(data.get('error'), 'Rate Limit Exceeded')
+
+        _rate_limit_records.clear()
+
+    def test_40_custom_error_handlers_sanitization(self):
+        """TEST 40: Custom error handlers sanitize 404, 403, and 400 API responses without leaking internals."""
+        # 404 Not Found API
+        res_404 = self.client.get('/api/undefined-endpoint-xyz')
+        self.assertEqual(res_404.status_code, 404)
+        data_404 = res_404.get_json()
+        self.assertFalse(data_404.get('success'))
+        self.assertEqual(data_404.get('error'), 'Not Found')
+
+        # 403 Forbidden API
+        res_403 = self.client.get('/api/admin/config')
+        self.assertEqual(res_403.status_code, 403)
+        data_403 = res_403.get_json()
+        self.assertFalse(data_403.get('success'))
+        self.assertEqual(data_403.get('message'), 'Admin privilege required.')
+
+        # 400 Bad Request API
+        self._login_as_admin()
+        res_400 = self.client.post('/api/admin/clear-records/nonexistent_mod', json={})
+        self.assertEqual(res_400.status_code, 400)
+        data_400 = res_400.get_json()
+        self.assertFalse(data_400.get('success'))
+        self.assertIn('Unknown module', data_400.get('message'))
 
 
 if __name__ == '__main__':

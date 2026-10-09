@@ -3,53 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Portal | Hostel Food Management</title>
+    <title>Student Portal | Hostel Food Management System</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <header class="app-header">
+    <a href="#student-main" class="skip-link">Skip to student dashboard</a>
+
+    <header class="app-header" role="banner">
         <div class="header-container">
             <div class="brand">
-                <div class="brand-icon">🎓</div>
+                <div class="brand-icon" aria-hidden="true">🎓</div>
                 <div>
                     <h1 class="brand-title" id="topStudentName">Student Portal</h1>
                     <p class="brand-subtitle" id="topStudentSrn">Hostel Resident Dashboard</p>
                 </div>
             </div>
-            <div class="header-actions">
-                <a href="/" class="btn btn-outline nav-link" title="Live Scanner Kiosk">
-                    <span>📷</span> Scanner
+            <nav class="header-actions" aria-label="Portal Navigation">
+                <a href="/" class="btn btn-outline nav-link" title="Open Canteen Scanner Kiosk">
+                    <span aria-hidden="true">📷</span> Scanner
                 </a>
                 <a href="/logout" class="btn btn-secondary nav-link">
-                    <span>🚪</span> Logout
+                    <span aria-hidden="true">🚪</span> Logout
                 </a>
-            </div>
+            </nav>
         </div>
     </header>
 
-    <main class="main-content container student-container">
+    <main id="student-main" class="main-content container student-container" role="main">
         
         <!-- Top Status Bar & Meal Privilege Card -->
-        <section class="student-status-banner card" id="mealAccessBanner">
+        <section class="student-status-banner card" id="mealAccessBanner" role="status" aria-live="polite">
             <div class="status-banner-content">
-                <div class="status-banner-icon" id="accessIcon">✅</div>
+                <div class="status-banner-icon" id="accessIcon" aria-hidden="true">✅</div>
                 <div>
-                    <h3 id="accessTitle">Meal Access Privileges: Active</h3>
+                    <h2 id="accessTitle" style="font-size:1.15rem;margin:0;">Meal Access Privileges: Active</h2>
                     <p id="accessDesc">You are eligible to claim daily Breakfast and Lunch at the college canteen.</p>
                 </div>
             </div>
-            <span class="badge badge-success" id="accessBadge">ELIGIBLE</span>
+            <span class="badge badge-success" id="accessBadge">ELIGIBLE ✅</span>
         </section>
 
         <!-- Profile & Fee Summary Grid -->
         <div class="student-summary-grid">
             <!-- Profile Card -->
-            <div class="card student-info-card">
+            <section class="card student-info-card" aria-labelledby="residentInfoTitle">
                 <div class="card-header">
-                    <h3 class="card-title">👤 Resident Information</h3>
+                    <h2 class="card-title" id="residentInfoTitle">👤 Resident Information</h2>
                     <span class="badge badge-neutral" id="profileBranchYear">--</span>
                 </div>
                 <div class="profile-details-list">
@@ -75,15 +77,15 @@
                     </div>
                     <div class="info-row">
                         <span class="label">Biometric Enrollment:</span>
-                        <span id="profileBioStatus" class="badge badge-success">Enrolled</span>
+                        <span id="profileBioStatus" class="badge badge-success">Enrolled ✅</span>
                     </div>
                 </div>
-            </div>
+            </section>
 
             <!-- Fee Summary Card -->
-            <div class="card fee-card">
+            <section class="card fee-card" aria-labelledby="feeAccountTitle">
                 <div class="card-header">
-                    <h3 class="card-title">💳 Hostel Fee Account</h3>
+                    <h2 class="card-title" id="feeAccountTitle">💳 Hostel Fee Account</h2>
                     <span class="badge badge-warning" id="feeStatusBadge">--</span>
                 </div>
                 <div class="fee-metrics">
@@ -103,54 +105,68 @@
                 <div class="fee-footer-note">
                     <small>💡 For payment receipts or fee clearance queries, please visit the hostel accounts office.</small>
                 </div>
-            </div>
+            </section>
         </div>
 
         <!-- Today's Canteen Menus -->
-        <section class="card menus-card">
+        <section class="card menus-card" aria-labelledby="canteenMenuTitle">
             <div class="card-header">
-                <h3 class="card-title">🍲 Today's Canteen Menu & Serving Hours</h3>
+                <h2 class="card-title" id="canteenMenuTitle">🍲 Today's Canteen Menu & Serving Hours</h2>
             </div>
             <div class="menu-cards-grid">
-                <div class="menu-box">
+                <article class="menu-box">
                     <div class="menu-box-header">
-                        <h4>🌅 Breakfast</h4>
+                        <h3>🌅 Breakfast</h3>
                         <span class="badge badge-neutral" id="bfHours">07:30 AM - 10:30 AM</span>
                     </div>
                     <p class="menu-items" id="bfMenu">Loading breakfast menu...</p>
-                </div>
+                </article>
 
-                <div class="menu-box">
+                <article class="menu-box">
                     <div class="menu-box-header">
-                        <h4>☀️ Lunch</h4>
+                        <h3>☀️ Lunch</h3>
                         <span class="badge badge-neutral" id="lunchHours">11:30 AM - 03:30 PM</span>
                     </div>
                     <p class="menu-items" id="lunchMenu">Loading lunch menu...</p>
-                </div>
+                </article>
             </div>
         </section>
 
         <!-- Personal Meal History & Payment History Tabs -->
-        <section class="card table-card">
-            <div class="tab-selector-inline">
-                <button class="tab-link active" onclick="switchStudentTab('meals')">
-                    🍽️ My Meal Attendance History
+        <section class="card table-card" aria-labelledby="historySectionTitle">
+            <h2 id="historySectionTitle" class="sr-only">Student Records History</h2>
+            <div class="tab-selector-inline" role="tablist" aria-label="Student records tabs">
+                <button class="tab-link active" 
+                        id="tabMeals" 
+                        role="tab" 
+                        aria-selected="true" 
+                        aria-controls="mealsView"
+                        tabindex="0"
+                        onclick="switchStudentTab('meals')">
+                    <span aria-hidden="true">🍽️</span> My Meal Attendance History
                 </button>
-                <button class="tab-link" onclick="switchStudentTab('payments')">
-                    📄 My Payment Receipts
+                <button class="tab-link" 
+                        id="tabPayments" 
+                        role="tab" 
+                        aria-selected="false" 
+                        aria-controls="paymentsView"
+                        tabindex="-1"
+                        onclick="switchStudentTab('payments')">
+                    <span aria-hidden="true">📄</span> My Payment Receipts
                 </button>
             </div>
 
             <!-- Meal History Table -->
-            <div id="mealsView" class="table-responsive">
+            <div id="mealsView" class="table-responsive" role="tabpanel" aria-labelledby="tabMeals">
                 <table class="data-table">
+                    <caption class="sr-only">My Meal Attendance History</caption>
                     <thead>
                         <tr>
-                            <th>Date</th>
-                            <th>Meal Type</th>
-                            <th>Entry Time</th>
-                            <th>Verification Method</th>
-                            <th>Status</th>
+                            <th scope="col">Date</th>
+                            <th scope="col">Meal Type</th>
+                            <th scope="col">Entry Time</th>
+                            <th scope="col">Verification Method</th>
+                            <th scope="col">Status</th>
                         </tr>
                     </thead>
                     <tbody id="studentMealsBody">
@@ -160,15 +176,16 @@
             </div>
 
             <!-- Payment Receipts Table -->
-            <div id="paymentsView" class="table-responsive" style="display: none;">
+            <div id="paymentsView" class="table-responsive" role="tabpanel" aria-labelledby="tabPayments" style="display: none;">
                 <table class="data-table">
+                    <caption class="sr-only">My Hostel Fee Payment Receipts</caption>
                     <thead>
                         <tr>
-                            <th>Date</th>
-                            <th>Receipt / Ref No.</th>
-                            <th>Payment Method</th>
-                            <th>Amount (INR)</th>
-                            <th>Remarks</th>
+                            <th scope="col">Date</th>
+                            <th scope="col">Receipt / Ref No.</th>
+                            <th scope="col">Payment Method</th>
+                            <th scope="col">Amount (INR)</th>
+                            <th scope="col">Remarks</th>
                         </tr>
                     </thead>
                     <tbody id="studentPaymentsBody">
@@ -179,24 +196,53 @@
         </section>
     </main>
 
-    <footer class="app-footer">
-        <p>Hostel Food Management System &bull; Student Self-Service Portal</p>
+    <footer class="app-footer" role="contentinfo">
+        <p>Hostel Food Management System &bull; Student Self-Service Portal &bull; WCAG 2.2 AA Accessible</p>
     </footer>
 
     <script>
         function switchStudentTab(tab) {
-            const tabs = document.querySelectorAll('.tab-link');
-            tabs.forEach(t => t.classList.remove('active'));
+            const tabMeals = document.getElementById('tabMeals');
+            const tabPayments = document.getElementById('tabPayments');
+            const mealsView = document.getElementById('mealsView');
+            const paymentsView = document.getElementById('paymentsView');
+
             if (tab === 'meals') {
-                tabs[0].classList.add('active');
-                document.getElementById('mealsView').style.display = 'block';
-                document.getElementById('paymentsView').style.display = 'none';
+                tabMeals.classList.add('active');
+                tabMeals.setAttribute('aria-selected', 'true');
+                tabMeals.setAttribute('tabindex', '0');
+
+                tabPayments.classList.remove('active');
+                tabPayments.setAttribute('aria-selected', 'false');
+                tabPayments.setAttribute('tabindex', '-1');
+
+                mealsView.style.display = 'block';
+                paymentsView.style.display = 'none';
             } else {
-                tabs[1].classList.add('active');
-                document.getElementById('mealsView').style.display = 'none';
-                document.getElementById('paymentsView').style.display = 'block';
+                tabPayments.classList.add('active');
+                tabPayments.setAttribute('aria-selected', 'true');
+                tabPayments.setAttribute('tabindex', '0');
+
+                tabMeals.classList.remove('active');
+                tabMeals.setAttribute('aria-selected', 'false');
+                tabMeals.setAttribute('tabindex', '-1');
+
+                mealsView.style.display = 'none';
+                paymentsView.style.display = 'block';
             }
         }
+
+        // Support arrow keys for tabs
+        document.querySelectorAll('.tab-selector-inline .tab-link').forEach(btn => {
+            btn.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    const activeTab = document.getElementById('tabMeals').getAttribute('aria-selected') === 'true' ? 'payments' : 'meals';
+                    switchStudentTab(activeTab);
+                    document.getElementById(activeTab === 'meals' ? 'tabMeals' : 'tabPayments').focus();
+                }
+            });
+        });
 
         async function loadStudentData() {
             try {
@@ -238,14 +284,14 @@
                         accessTitle.textContent = 'Meal Privileges: Active & Eligible';
                         accessDesc.textContent = 'You are cleared to access daily Breakfast and Lunch at the college canteen.';
                         accessBadge.className = 'badge badge-success';
-                        accessBadge.textContent = 'ELIGIBLE';
+                        accessBadge.textContent = 'ELIGIBLE ✅';
                     } else {
                         banner.className = 'student-status-banner card banner-danger';
                         accessIcon.textContent = '⛔';
                         accessTitle.textContent = 'Meal Access Restricted';
                         accessDesc.textContent = s.meal_restriction_reason || 'Access disabled. Please contact hostel administration.';
                         accessBadge.className = 'badge badge-danger';
-                        accessBadge.textContent = 'RESTRICTED';
+                        accessBadge.textContent = 'RESTRICTED ⛔';
                     }
 
                     // Fees
@@ -254,7 +300,7 @@
                     document.getElementById('pendingFeeVal').textContent = `₹${s.pending_fees.toFixed(2)}`;
 
                     const feeBadge = document.getElementById('feeStatusBadge');
-                    feeBadge.textContent = s.fee_status;
+                    feeBadge.textContent = `${s.fee_status} 💳`;
                     if (s.fee_status === 'PAID') feeBadge.className = 'badge badge-success';
                     else if (s.fee_status === 'PARTIALLY PAID') feeBadge.className = 'badge badge-warning';
                     else feeBadge.className = 'badge badge-danger';

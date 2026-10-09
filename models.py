@@ -61,8 +61,8 @@ class Student(db.Model):
     # Biometrics & Access Controls
     face_encoding = db.Column(db.Text, nullable=True)  # JSON-serialized 128-float list
     photo_preview = db.Column(db.Text, nullable=True)   # Base64 thumbnail
-    active = db.Column(db.Boolean, default=True, nullable=False)
-    meal_access_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    meal_access_enabled = db.Column(db.Boolean, default=True, nullable=False, index=True)
     meal_restriction_reason = db.Column(db.String(255), default='None')
 
     # Student portal credentials
@@ -144,7 +144,7 @@ class FeePayment(db.Model):
     student_id = db.Column(db.String(50), nullable=False, index=True)
     student_name = db.Column(db.String(100), nullable=False)
     amount = db.Column(db.Float, nullable=False)
-    payment_date = db.Column(db.String(15), nullable=False)  # YYYY-MM-DD
+    payment_date = db.Column(db.String(15), nullable=False, index=True)  # YYYY-MM-DD
     payment_method = db.Column(db.String(30), default='UPI') # UPI, Cash, Card, Net Banking
     reference_no = db.Column(db.String(100), nullable=True)  # Receipt or Bank Ref
     remarks = db.Column(db.String(255), nullable=True)
@@ -203,7 +203,7 @@ class FoodEntry(db.Model):
     meal = db.Column(db.String(20), default='Lunch', nullable=False)
     entry_date = db.Column(db.String(10), nullable=False, index=True)  # Format: YYYY-MM-DD
     entry_time = db.Column(db.String(15), nullable=False)              # Format: HH:MM:SS AM/PM
-    timestamp = db.Column(db.DateTime, default=datetime.now)
+    timestamp = db.Column(db.DateTime, default=datetime.now, index=True)
     verification_method = db.Column(db.String(20), default='face')     # 'face' or 'manual'
     status = db.Column(db.String(20), default='Approved', nullable=False)
 
@@ -268,7 +268,7 @@ class SmsLog(db.Model):
     provider_name = db.Column(db.String(50), default='mock')
     provider_ref = db.Column(db.String(100), nullable=True)
     error_message = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
 
     def to_dict(self):
         return {
@@ -323,7 +323,7 @@ class AuditLog(db.Model):
     target_type = db.Column(db.String(50), nullable=True)  # 'student', 'fee', 'menu', 'config'
     target_id = db.Column(db.String(50), nullable=True)
     details = db.Column(db.Text, nullable=True)
-    timestamp = db.Column(db.DateTime, default=datetime.now)
+    timestamp = db.Column(db.DateTime, default=datetime.now, index=True)
 
     def to_dict(self):
         return {

@@ -64,3 +64,8 @@ class Config:
     REPORTS_DIR = os.path.join(basedir, 'reports')
     DATA_RETENTION_POLICY = os.environ.get('DATA_RETENTION_POLICY', 'archive')
     ALLOW_PERMANENT_DELETION = os.environ.get('ALLOW_PERMANENT_DELETION', 'False').lower() in ('true', '1', 'yes')
+
+    # Security & Defense-in-Depth Policies
+    MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))  # 16 MB max payload limit
+    CSRF_ENABLED = os.environ.get('CSRF_ENABLED', 'True').lower() in ('true', '1', 'yes')
+    RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'True').lower() in ('true', '1', 'yes')

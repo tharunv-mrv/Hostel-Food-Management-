@@ -1,6 +1,9 @@
 import os
 import json
-from datetime import datetime, time
+import secrets
+import time
+from collections import defaultdict
+from datetime import datetime, time as dtime
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, current_app, session, redirect, url_for, send_file
 from werkzeug.security import generate_password_hash
@@ -14,6 +17,38 @@ from models import (
 from face_service import face_service
 from sms_service import send_meal_sms_async
 from report_service import generate_daily_attendance_excel
+
+
+# In-memory sliding window rate-limiting store
+_rate_limit_records = defaultdict(list)
+
+
+def get_client_ip():
+    """Extract client IP address accounting for reverse proxy headers."""
+    forwarded = request.headers.get('X-Forwarded-For')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+def check_rate_limit(key: str, max_requests: int = 30, window_seconds: int = 60) -> bool:
+    """Sliding-window in-memory rate limiter per client IP or action."""
+    if current_app.config.get('TESTING', False) or not current_app.config.get('RATE_LIMIT_ENABLED', True):
+        return True
+    now = time.time()
+    history = _rate_limit_records[key]
+    _rate_limit_records[key] = [t for t in history if now - t < window_seconds]
+    if len(_rate_limit_records[key]) >= max_requests:
+        return False
+    _rate_limit_records[key].append(now)
+    return True
+
+
+def get_csrf_token() -> str:
+    """Retrieve or generate cryptographically secure CSRF token bound to current session."""
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = secrets.token_hex(32)
+    return session['_csrf_token']
 
 
 # ==========================================
@@ -78,10 +113,10 @@ def log_audit(action, target_type=None, target_id=None, details=None):
 def get_current_meal_type():
     """Determine the active meal type based on server time and configured windows."""
     now_time = datetime.now().time()
-    bf_start = time(*map(int, current_app.config.get('BREAKFAST_START_TIME', '07:30').split(':')))
-    bf_end = time(*map(int, current_app.config.get('BREAKFAST_END_TIME', '10:30').split(':')))
-    lunch_start = time(*map(int, current_app.config.get('LUNCH_START_TIME', '11:30').split(':')))
-    lunch_end = time(*map(int, current_app.config.get('LUNCH_END_TIME', '15:30').split(':')))
+    bf_start = dtime(*map(int, current_app.config.get('BREAKFAST_START_TIME', '07:30').split(':')))
+    bf_end = dtime(*map(int, current_app.config.get('BREAKFAST_END_TIME', '10:30').split(':')))
+    lunch_start = dtime(*map(int, current_app.config.get('LUNCH_START_TIME', '11:30').split(':')))
+    lunch_end = dtime(*map(int, current_app.config.get('LUNCH_END_TIME', '15:30').split(':')))
 
     if bf_start <= now_time <= bf_end:
         return 'Breakfast', True
@@ -122,11 +157,11 @@ def validate_meal_eligibility(student, meal_type):
     # Rule 4: Serving window enforcement
     if current_app.config.get('ENFORCE_MEAL_HOURS', False):
         if meal_type == 'Breakfast':
-            start = time(*map(int, current_app.config.get('BREAKFAST_START_TIME', '07:30').split(':')))
-            end = time(*map(int, current_app.config.get('BREAKFAST_END_TIME', '10:30').split(':')))
+            start = dtime(*map(int, current_app.config.get('BREAKFAST_START_TIME', '07:30').split(':')))
+            end = dtime(*map(int, current_app.config.get('BREAKFAST_END_TIME', '10:30').split(':')))
         else:
-            start = time(*map(int, current_app.config.get('LUNCH_START_TIME', '11:30').split(':')))
-            end = time(*map(int, current_app.config.get('LUNCH_END_TIME', '15:30').split(':')))
+            start = dtime(*map(int, current_app.config.get('LUNCH_START_TIME', '11:30').split(':')))
+            end = dtime(*map(int, current_app.config.get('LUNCH_END_TIME', '15:30').split(':')))
 
         if not (start <= now_time <= end):
             return False, f"Serving window for {meal_type} is closed ({start.strftime('%I:%M %p')} - {end.strftime('%I:%M %p')}).", "outside_hours"
@@ -150,6 +185,80 @@ def validate_meal_eligibility(student, meal_type):
 
 def register_routes(app):
     """Register all web routes, APIs, and view endpoints."""
+
+    # ------------------------------------------
+    # SECURITY MIDDLEWARE & DEFENSE-IN-DEPTH
+    # ------------------------------------------
+
+    @app.context_processor
+    def inject_csrf_token():
+        return dict(csrf_token=get_csrf_token)
+
+    @app.before_request
+    def validate_csrf():
+        """Validate CSRF token for state-changing requests when session is active."""
+        if current_app.config.get('TESTING', False) or not current_app.config.get('CSRF_ENABLED', True):
+            return None
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return None
+        # Exempt biometric camera stream and initial login
+        if request.path in ('/api/scan-face', '/api/auth/login', '/health', '/api/health'):
+            return None
+
+        if session.get('role'):
+            token = request.headers.get('X-CSRF-Token') or request.headers.get('X-CSRFToken')
+            if not token and request.is_json:
+                token = (request.get_json(silent=True) or {}).get('csrf_token')
+            if not token and request.form:
+                token = request.form.get('csrf_token')
+            expected = session.get('_csrf_token')
+            if not expected or not token or not secrets.compare_digest(str(token), str(expected)):
+                return jsonify({'success': False, 'message': 'CSRF validation failed: missing or invalid token.'}), 403
+        return None
+
+    @app.after_request
+    def add_security_headers(response):
+        """Inject defense-in-depth HTTP security headers."""
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        return response
+
+    @app.errorhandler(400)
+    def handle_bad_request(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Bad Request', 'message': str(e)}), 400
+        return render_template('login.html'), 400
+
+    @app.errorhandler(403)
+    def handle_forbidden(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Forbidden', 'message': 'Access forbidden.'}), 403
+        return render_template('login.html'), 403
+
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Not Found', 'message': 'Resource not found.'}), 404
+        return render_template('login.html'), 404
+
+    @app.errorhandler(429)
+    def handle_rate_limited(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Rate Limit Exceeded', 'message': 'Too many requests. Please wait a moment.'}), 429
+        return render_template('login.html'), 429
+
+    @app.errorhandler(500)
+    def handle_server_error(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'success': False, 'error': 'Server Error', 'message': 'An internal server error occurred.'}), 500
+        return render_template('login.html'), 500
+
+    @app.route('/api/auth/csrf', methods=['GET'])
+    def api_csrf():
+        """Retrieve current session CSRF token."""
+        return jsonify({'success': True, 'csrf_token': get_csrf_token()}), 200
 
     # ------------------------------------------
     # HEALTH CHECK & SYSTEM MONITORING
@@ -215,6 +324,10 @@ def register_routes(app):
     @app.route('/api/auth/login', methods=['POST'])
     def api_login():
         """Authenticate administrator or student."""
+        client_ip = get_client_ip()
+        if not check_rate_limit(f"login_{client_ip}", max_requests=25, window_seconds=60):
+            return jsonify({'success': False, 'error': 'Rate Limit Exceeded', 'message': 'Too many login attempts. Please wait 1 minute.'}), 429
+
         data = request.get_json() or {}
         role = data.get('role', 'student').lower()
         username = (data.get('username') or '').strip()
@@ -291,6 +404,10 @@ def register_routes(app):
         Canteen Biometric Verification endpoint.
         Receives webcam frame, verifies face, records meal if eligible, sends SMS.
         """
+        client_ip = get_client_ip()
+        if not check_rate_limit(f"scan_{client_ip}", max_requests=120, window_seconds=60):
+            return jsonify({'success': False, 'status': 'rate_limited', 'message': 'Too many face scan requests. Please wait a moment.'}), 429
+
         data = request.get_json() or {}
         image_data = data.get('image')
         requested_meal = data.get('meal_type')  # 'Breakfast', 'Lunch', or None (auto)

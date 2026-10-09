@@ -4,8 +4,8 @@
     --bg-surface-elevated: #283548;
     --border-color: #334155;
     --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
     --color-primary: #3b82f6;
     --color-primary-hover: #2563eb;
     --color-success: #10b981;
@@ -21,6 +21,80 @@
     --radius-lg: 16px;
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* ==========================================
+   ACCESSIBILITY FOUNDATIONS (WCAG 2.2 AA)
+   ========================================== */
+
+/* High-visibility Keyboard Focus Indicator */
+:focus-visible {
+    outline: 3px solid #60a5fa !important;
+    outline-offset: 3px !important;
+}
+
+a:focus-visible, 
+button:focus-visible, 
+input:focus-visible, 
+select:focus-visible, 
+textarea:focus-visible,
+[tabindex]:focus-visible {
+    outline: 3px solid #60a5fa !important;
+    outline-offset: 2px !important;
+}
+
+/* Skip to Main Content Link */
+.skip-link {
+    position: absolute;
+    top: -120px;
+    left: 1.5rem;
+    background: var(--color-primary);
+    color: #ffffff;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius-sm);
+    z-index: 9999;
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+    box-shadow: var(--shadow-lg);
+    border: 2px solid #ffffff;
+    transition: top 0.15s ease-in-out;
+}
+
+.skip-link:focus {
+    top: 1.5rem;
+    outline: 3px solid #60a5fa;
+    outline-offset: 3px;
+}
+
+/* Screen-Reader Only Utility */
+.sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* Form Validation & Error States */
+input[aria-invalid="true"], 
+select[aria-invalid="true"] {
+    border-color: var(--color-danger) !important;
+    background-color: rgba(239, 68, 68, 0.08) !important;
+}
+
+.field-error-msg {
+    color: #fca5a5;
+    font-size: 0.8rem;
+    margin-top: 0.35rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 500;
 }
 
 * {
@@ -1454,10 +1528,22 @@ input:focus, select:focus, textarea:focus {
     100% { transform: translateX(350%); width: 25%; }
 }
 
-/* Reduced Motion Accessibility */
+/* Reduced Motion Accessibility (WCAG 2.2 AA) */
 @media (prefers-reduced-motion: reduce) {
-    .scan-laser, .state-progress-fill {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .scan-laser, 
+    .state-progress-fill, 
+    .pulsing-dot, 
+    .spinner {
         animation: none !important;
     }
 }
+
 

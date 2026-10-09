@@ -6,13 +6,21 @@ let capturedPhotoData = null;
 
 function switchAdminSection(sectionName) {
     document.querySelectorAll('.admin-section').forEach(sec => sec.style.display = 'none');
-    document.querySelectorAll('.nav-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.nav-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
+        btn.setAttribute('tabindex', '-1');
+    });
 
     const activeSec = document.getElementById(`section-${sectionName}`);
     if (activeSec) activeSec.style.display = 'block';
 
     const tabBtn = Array.from(document.querySelectorAll('.nav-tab-btn')).find(b => b.getAttribute('onclick')?.includes(sectionName));
-    if (tabBtn) tabBtn.classList.add('active');
+    if (tabBtn) {
+        tabBtn.classList.add('active');
+        tabBtn.setAttribute('aria-selected', 'true');
+        tabBtn.setAttribute('tabindex', '0');
+    }
 
     // Trigger tab-specific refresh safely
     if (sectionName === 'fees' && window.loadFeeLedger) window.loadFeeLedger();
@@ -24,6 +32,7 @@ function switchAdminSection(sectionName) {
     else if (sectionName === 'audit' && window.loadAuditLogs) window.loadAuditLogs();
     else if (sectionName === 'config' && window.loadConfig) window.loadConfig();
 }
+
 
 // Monotonic request sequence counters to prevent stale responses overwriting newer data
 let attendanceReqSeq = 0;
@@ -1035,6 +1044,39 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Keyboard accessibility for admin tabs (Arrow keys & Escape)
+    const adminTabs = Array.from(document.querySelectorAll('.admin-nav-tabs .nav-tab-btn'));
+    adminTabs.forEach((tab, index) => {
+        tab.addEventListener('keydown', (e) => {
+            let nextIndex = null;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                nextIndex = (index + 1) % adminTabs.length;
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                nextIndex = (index - 1 + adminTabs.length) % adminTabs.length;
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                nextIndex = 0;
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                nextIndex = adminTabs.length - 1;
+            }
+            if (nextIndex !== null) {
+                adminTabs[nextIndex].click();
+                adminTabs[nextIndex].focus();
+            }
+        });
+    });
+
+    // Modal Escape key support
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (typeof window.closeClearRecordsModal === 'function') window.closeClearRecordsModal();
+            if (typeof closePaymentModal === 'function') closePaymentModal();
+        }
+    });
+
     // Initial boot
     initAdminCamera();
     loadStudents();
@@ -1042,3 +1084,4 @@ document.addEventListener('DOMContentLoaded', () => {
     window.loadAttendanceLogs();
     window.loadRejectedLogs();
 });
+

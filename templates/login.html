@@ -3,70 +3,118 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login | Hostel Food Management System</title>
+    <title>Sign In | AI-Powered Hostel Food Management System</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body class="login-body">
-    <div class="login-wrapper">
+    <a href="#login-main" class="skip-link">Skip to login form</a>
+
+    <main id="login-main" class="login-wrapper" role="main">
         <div class="login-card card">
-            <div class="login-brand">
-                <div class="brand-icon">🍽️</div>
-                <h2>Hostel Food Management</h2>
+            <header class="login-brand">
+                <div class="brand-icon" aria-hidden="true">🍽️</div>
+                <h1 class="brand-title" style="font-size:1.4rem;">Hostel Food Management</h1>
                 <p class="brand-subtitle">Smart Biometrics & Canteen Portal</p>
-            </div>
+            </header>
 
             <!-- Role Selector Tabs -->
-            <div class="tab-selector">
-                <button type="button" class="tab-btn active" id="studentTabBtn" onclick="switchLoginTab('student')">
-                    🎓 Student Login
+            <div class="tab-selector" role="tablist" aria-label="Sign-in role selector">
+                <button type="button" 
+                        class="tab-btn active" 
+                        id="studentTabBtn" 
+                        role="tab" 
+                        aria-selected="true" 
+                        aria-controls="studentLoginForm"
+                        tabindex="0"
+                        onclick="switchLoginTab('student')">
+                    <span aria-hidden="true">🎓</span> Student Login
                 </button>
-                <button type="button" class="tab-btn" id="adminTabBtn" onclick="switchLoginTab('admin')">
-                    ⚙️ Admin Login
+                <button type="button" 
+                        class="tab-btn" 
+                        id="adminTabBtn" 
+                        role="tab" 
+                        aria-selected="false" 
+                        aria-controls="adminLoginForm"
+                        tabindex="-1"
+                        onclick="switchLoginTab('admin')">
+                    <span aria-hidden="true">⚙️</span> Admin Login
                 </button>
             </div>
 
-            <div id="loginAlert" class="alert-box" style="display: none;"></div>
+            <div id="loginAlert" class="alert-box" role="alert" aria-live="assertive" style="display: none;"></div>
 
             <!-- Student Login Form -->
-            <form id="studentLoginForm" class="login-form">
+            <form id="studentLoginForm" class="login-form" role="tabpanel" aria-labelledby="studentTabBtn">
                 <div class="form-group">
-                    <label for="studentUsername">Student ID or SRN <span class="required">*</span></label>
-                    <input type="text" id="studentUsername" placeholder="e.g. 1XX23AIML001" required>
+                    <label for="studentUsername">Student ID or SRN <span class="required" aria-hidden="true">*</span></label>
+                    <input type="text" 
+                           id="studentUsername" 
+                           name="username"
+                           placeholder="e.g. 1XX23AIML001" 
+                           autocomplete="username"
+                           aria-required="true"
+                           aria-describedby="studentLoginHint"
+                           required>
                 </div>
                 <div class="form-group">
-                    <label for="studentPassword">Password <span class="required">*</span></label>
-                    <input type="password" id="studentPassword" placeholder="Default: Student@123" required>
+                    <label for="studentPassword">Password <span class="required" aria-hidden="true">*</span></label>
+                    <input type="password" 
+                           id="studentPassword" 
+                           name="password"
+                           placeholder="Default: Student@123" 
+                           autocomplete="current-password"
+                           aria-required="true"
+                           required>
                 </div>
                 <button type="submit" id="studentSubmitBtn" class="btn btn-primary full-width">
                     Sign In as Student
                 </button>
-                <p class="login-hint">💡 Default password for enrolled students is <code>Student@123</code></p>
+                <p class="login-hint" id="studentLoginHint">
+                    <span aria-hidden="true">💡</span> Default password for enrolled students is <code>Student@123</code>
+                </p>
             </form>
 
             <!-- Admin Login Form -->
-            <form id="adminLoginForm" class="login-form" style="display: none;">
+            <form id="adminLoginForm" class="login-form" role="tabpanel" aria-labelledby="adminTabBtn" style="display: none;">
                 <div class="form-group">
-                    <label for="adminUsername">Admin Username <span class="required">*</span></label>
-                    <input type="text" id="adminUsername" placeholder="e.g. admin" required>
+                    <label for="adminUsername">Admin Username <span class="required" aria-hidden="true">*</span></label>
+                    <input type="text" 
+                           id="adminUsername" 
+                           name="admin_username"
+                           placeholder="e.g. admin" 
+                           autocomplete="username"
+                           aria-required="true"
+                           aria-describedby="adminLoginHint"
+                           required>
                 </div>
                 <div class="form-group">
-                    <label for="adminPassword">Admin Password <span class="required">*</span></label>
-                    <input type="password" id="adminPassword" placeholder="e.g. Admin@123" required>
+                    <label for="adminPassword">Admin Password <span class="required" aria-hidden="true">*</span></label>
+                    <input type="password" 
+                           id="adminPassword" 
+                           name="admin_password"
+                           placeholder="e.g. Admin@123" 
+                           autocomplete="current-password"
+                           aria-required="true"
+                           required>
                 </div>
                 <button type="submit" id="adminSubmitBtn" class="btn btn-primary full-width">
                     Sign In as Administrator
                 </button>
-                <p class="login-hint">💡 Default admin: <code>admin</code> / <code>Admin@123</code></p>
+                <p class="login-hint" id="adminLoginHint">
+                    <span aria-hidden="true">💡</span> Default admin: <code>admin</code> / <code>Admin@123</code>
+                </p>
             </form>
 
-            <div class="login-footer">
-                <a href="/" class="nav-back-link">← Go to Canteen Live Scanner</a>
-            </div>
+            <footer class="login-footer">
+                <a href="/" class="nav-back-link">
+                    <span aria-hidden="true">&larr;</span> Return to Canteen Live Scanner
+                </a>
+            </footer>
         </div>
-    </div>
+    </main>
 
     <script>
         let currentRole = 'student';
@@ -82,16 +130,43 @@
 
             if (role === 'student') {
                 studentTab.classList.add('active');
+                studentTab.setAttribute('aria-selected', 'true');
+                studentTab.setAttribute('tabindex', '0');
+
                 adminTab.classList.remove('active');
+                adminTab.setAttribute('aria-selected', 'false');
+                adminTab.setAttribute('tabindex', '-1');
+
                 studentForm.style.display = 'block';
                 adminForm.style.display = 'none';
+                document.getElementById('studentUsername').focus();
             } else {
                 adminTab.classList.add('active');
+                adminTab.setAttribute('aria-selected', 'true');
+                adminTab.setAttribute('tabindex', '0');
+
                 studentTab.classList.remove('active');
+                studentTab.setAttribute('aria-selected', 'false');
+                studentTab.setAttribute('tabindex', '-1');
+
                 adminForm.style.display = 'block';
                 studentForm.style.display = 'none';
+                document.getElementById('adminUsername').focus();
             }
         }
+
+        // Support Left/Right arrow keys for accessible tab switching
+        document.querySelectorAll('.tab-selector .tab-btn').forEach(btn => {
+            btn.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    switchLoginTab(currentRole === 'student' ? 'admin' : 'student');
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    switchLoginTab(currentRole === 'admin' ? 'student' : 'admin');
+                }
+            });
+        });
 
         async function handleLogin(e, role) {
             e.preventDefault();
@@ -108,7 +183,7 @@
 
             const btn = role === 'admin' ? document.getElementById('adminSubmitBtn') : document.getElementById('studentSubmitBtn');
             btn.disabled = true;
-            btn.textContent = 'Verifying...';
+            btn.textContent = 'Verifying identity...';
 
             try {
                 const res = await fetch('/api/auth/login', {
@@ -120,12 +195,12 @@
                 if (res.ok && data.success) {
                     window.location.href = data.redirect || (role === 'admin' ? '/admin' : '/student');
                 } else {
-                    alertBox.textContent = `❌ ${data.message || 'Login failed.'}`;
+                    alertBox.textContent = `❌ ${data.message || 'Login failed. Please check credentials.'}`;
                     alertBox.className = 'alert-box alert-danger';
                     alertBox.style.display = 'block';
                 }
             } catch (err) {
-                alertBox.textContent = '❌ Network error during sign-in.';
+                alertBox.textContent = '❌ Network error during sign-in. Please try again.';
                 alertBox.className = 'alert-box alert-danger';
                 alertBox.style.display = 'block';
             } finally {

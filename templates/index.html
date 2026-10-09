@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D AI Biometric Scanner | Hostel Food Management</title>
+    <title>3D AI Biometric Scanner | Hostel Food Management System</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,61 +12,78 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
-    <header class="app-header">
+    <a href="#scanner-main" class="skip-link">Skip to canteen scanner</a>
+
+    <header class="app-header" role="banner">
         <div class="header-container">
             <div class="brand">
-                <div class="brand-icon">🍽️</div>
+                <div class="brand-icon" aria-hidden="true">🍽️</div>
                 <div>
                     <h1 class="brand-title">Hostel Food Management</h1>
                     <p class="brand-subtitle">AI 3D Biometric Scanner & Instant Meal Attendance</p>
                 </div>
             </div>
-            <div class="header-actions">
-                <div class="live-clock" id="liveClock">--:--:--</div>
+            <nav class="header-actions" aria-label="Quick Portal Links">
+                <div class="live-clock" id="liveClock" role="timer" aria-label="Current canteen clock">--:--:--</div>
                 <a href="/login" class="btn btn-outline nav-link" title="Student & Admin Sign In">
-                    <span>🔑</span> Sign In
+                    <span aria-hidden="true">🔑</span> Sign In
                 </a>
                 <a href="/admin" class="btn btn-secondary nav-link" title="Administrator Dashboard">
-                    <span>⚙️</span> Admin Portal
+                    <span aria-hidden="true">⚙️</span> Admin Portal
                 </a>
-            </div>
+            </nav>
         </div>
     </header>
 
-    <main class="main-content container">
+    <main id="scanner-main" class="main-content container" role="main">
         
         <!-- Active Meal Service Banner -->
-        <div class="meal-service-banner">
+        <section class="meal-service-banner" aria-label="Meal service mode">
             <div class="service-type-selector">
-                <span class="selector-label">Meal Service:</span>
-                <div class="meal-toggle-group">
-                    <button type="button" class="meal-toggle-btn active" id="btnAutoMeal" onclick="setScanMeal('auto')">
-                        ⚡ Auto-Detect
+                <span class="selector-label" id="mealSelectorLabel">Meal Service:</span>
+                <div class="meal-toggle-group" role="radiogroup" aria-labelledby="mealSelectorLabel">
+                    <button type="button" 
+                            class="meal-toggle-btn active" 
+                            id="btnAutoMeal" 
+                            role="radio" 
+                            aria-checked="true"
+                            onclick="setScanMeal('auto')">
+                        <span aria-hidden="true">⚡</span> Auto-Detect
                     </button>
-                    <button type="button" class="meal-toggle-btn" id="btnBreakfastMeal" onclick="setScanMeal('Breakfast')">
-                        🌅 Breakfast
+                    <button type="button" 
+                            class="meal-toggle-btn" 
+                            id="btnBreakfastMeal" 
+                            role="radio" 
+                            aria-checked="false"
+                            onclick="setScanMeal('Breakfast')">
+                        <span aria-hidden="true">🌅</span> Breakfast
                     </button>
-                    <button type="button" class="meal-toggle-btn" id="btnLunchMeal" onclick="setScanMeal('Lunch')">
-                        ☀️ Lunch
+                    <button type="button" 
+                            class="meal-toggle-btn" 
+                            id="btnLunchMeal" 
+                            role="radio" 
+                            aria-checked="false"
+                            onclick="setScanMeal('Lunch')">
+                        <span aria-hidden="true">☀️</span> Lunch
                     </button>
                 </div>
             </div>
             <div class="current-service-indicator">
-                <span class="active-meal-pill" id="activeMealPill">Detecting Active Meal...</span>
+                <span class="active-meal-pill" id="activeMealPill" role="status" aria-live="polite">Detecting Active Meal...</span>
             </div>
-        </div>
+        </section>
 
         <div class="scanner-grid">
             <!-- Left Column: Automatic Camera & 3D Holographic Head Scanner -->
-            <section class="card camera-card" aria-label="3D Biometric Facial Scanner">
+            <section class="card camera-card" aria-labelledby="scannerSectionTitle">
                 <div class="card-header flex-header">
                     <div class="header-badge-group">
-                        <div class="badge badge-live">
-                            <span class="pulsing-dot"></span> AUTO SCANNER
+                        <div class="badge badge-live" aria-label="Camera is live and scanning automatically">
+                            <span class="pulsing-dot" aria-hidden="true"></span> AUTO SCANNER
                         </div>
-                        <span class="camera-status" id="cameraStatus">Initializing Camera...</span>
+                        <span class="camera-status" id="cameraStatus" role="status">Initializing Camera...</span>
                     </div>
-                    <div id="cooldownIndicator" class="cooldown-pill" style="display: none;">
+                    <div id="cooldownIndicator" class="cooldown-pill" style="display: none;" role="status">
                         <span>Next scan in</span> <strong id="cooldownTimer">3</strong>s
                     </div>
                 </div>
@@ -76,13 +93,13 @@
                     
                     <!-- Left: Camera Viewport with Facial Guide -->
                     <div class="viewport-box camera-box">
-                        <div class="panel-tag">LIVE OPTICAL FEED</div>
-                        <video id="webcam" autoplay playsinline muted></video>
-                        <canvas id="snapshotCanvas" style="display: none;"></canvas>
-                        <canvas id="landmarkCanvas" class="landmark-overlay"></canvas>
+                        <div class="panel-tag" aria-hidden="true">LIVE OPTICAL FEED</div>
+                        <video id="webcam" autoplay playsinline muted aria-label="Live webcam optical feed"></video>
+                        <canvas id="snapshotCanvas" style="display: none;" aria-hidden="true"></canvas>
+                        <canvas id="landmarkCanvas" class="landmark-overlay" role="img" aria-label="Biometric landmark detection mesh"></canvas>
 
                         <!-- HUD Guide Overlay -->
-                        <div class="face-guide">
+                        <div class="face-guide" aria-hidden="true">
                             <div class="target-corner tl"></div>
                             <div class="target-corner tr"></div>
                             <div class="target-corner bl"></div>
@@ -91,16 +108,16 @@
                         </div>
 
                         <!-- Scanner Status Overlay for Loading / Quality checks -->
-                        <div class="scanner-overlay" id="scannerOverlay">
-                            <div class="spinner"></div>
+                        <div class="scanner-overlay" id="scannerOverlay" aria-hidden="true">
+                            <div class="spinner" aria-hidden="true"></div>
                             <p class="overlay-text" id="overlayText">Verifying Face Biometrics...</p>
                         </div>
                     </div>
 
                     <!-- Right: 3D Biometric Facial Mesh Hologram -->
                     <div class="viewport-box model-3d-box" id="model3dContainer">
-                        <div class="panel-tag">3D FACIAL TOPOGRAPHY</div>
-                        <canvas id="canvas3d" class="three-canvas"></canvas>
+                        <div class="panel-tag" aria-hidden="true">3D FACIAL TOPOGRAPHY</div>
+                        <canvas id="canvas3d" class="three-canvas" role="img" aria-label="3D holographic head biometric visualization"></canvas>
                         
                         <!-- 3D Overlay Stats HUD -->
                         <div class="hud-metrics">
@@ -115,58 +132,61 @@
                         </div>
 
                         <!-- Biometric Landmark Guide Lines -->
-                        <div class="hud-crosshair-center"></div>
+                        <div class="hud-crosshair-center" aria-hidden="true"></div>
                     </div>
 
                 </div>
 
                 <!-- Real-time Scanner State Banner (ARIA Live) -->
                 <div class="scanner-state-bar state-searching" id="scannerStateBar" role="status" aria-live="polite">
-                    <div class="state-icon-bubble" id="stateIconBubble">🔍</div>
+                    <div class="state-icon-bubble" id="stateIconBubble" aria-hidden="true">🔍</div>
                     <div class="state-text-info">
-                        <h4 class="state-headline" id="stateHeadline">Searching for a face...</h4>
+                        <h2 class="state-headline" id="stateHeadline" style="font-size:1rem;margin:0;">Searching for a face...</h2>
                         <p class="state-description" id="stateDescription">Step in front of the camera to verify identity automatically.</p>
                     </div>
-                    <div class="state-progress-bar">
+                    <div class="state-progress-bar" aria-hidden="true">
                         <div class="state-progress-fill" id="stateProgressFill"></div>
                     </div>
                 </div>
 
-                <!-- Scanner Controls & Staff Actions -->
+                <!-- Scanner Controls & Alternative Manual Verification -->
                 <div class="camera-controls">
-                    <button id="toggleAutoScanBtn" class="btn btn-secondary" title="Pause or resume automatic scanning">
-                        ⏸️ Pause Auto-Scan
+                    <button id="toggleAutoScanBtn" class="btn btn-secondary" aria-label="Pause or resume automatic scanning">
+                        <span aria-hidden="true">⏸️</span> Pause Auto-Scan
                     </button>
-                    <button id="retryCamBtn" class="btn btn-outline" title="Restart camera stream">
-                        🔄 Restart Camera
+                    <button id="retryCamBtn" class="btn btn-outline" aria-label="Restart camera stream">
+                        <span aria-hidden="true">🔄</span> Restart Camera
+                    </button>
+                    <button type="button" class="btn btn-outline" id="openManualEntryBtn" onclick="openManualModal()" aria-haspopup="dialog" aria-label="Alternative identification: manual student ID entry">
+                        <span aria-hidden="true">⌨️</span> Manual ID Alternative
                     </button>
                 </div>
 
                 <div class="camera-instructions">
-                    <p>💡 <strong>Automatic Detection:</strong> No button needed. Look directly into the camera. System validates eligibility & records attendance automatically.</p>
+                    <p>💡 <strong>Automatic Detection:</strong> No button needed. Look directly into the camera. If face recognition fails or camera is unavailable, use the <em>Manual ID Alternative</em> button above.</p>
                 </div>
             </section>
 
             <!-- Right Column: Verification Result & Permitted Student Profile -->
-            <section class="card result-card" aria-label="Verification Status Panel">
+            <section class="card result-card" aria-labelledby="resultTitle">
                 <div class="card-header">
-                    <h2 class="card-title">Verification Status</h2>
-                    <span id="resultPill" class="badge badge-neutral">Standby</span>
+                    <h2 class="card-title" id="resultTitle">Verification Status</h2>
+                    <span id="resultPill" class="badge badge-neutral" role="status">Standby</span>
                 </div>
 
                 <!-- Standby Placeholder View -->
-                <div id="standbyView" class="result-placeholder">
-                    <div class="placeholder-icon">👤</div>
+                <div id="standbyView" class="result-placeholder" role="region" aria-label="Scanner standby view">
+                    <div class="placeholder-icon" aria-hidden="true">👤</div>
                     <h3>Waiting for Resident</h3>
                     <p>Center your face in the camera viewport. The system automatically detects resident facial topography and records meal attendance.</p>
                 </div>
 
                 <!-- Verification Result Display Area -->
-                <div id="resultContent" class="result-content" style="display: none;">
+                <div id="resultContent" class="result-content" style="display: none;" role="region" aria-live="assertive">
                     
                     <!-- Result Status Banner -->
-                    <div id="statusBanner" class="status-banner banner-success">
-                        <div class="banner-icon" id="bannerIcon">✅</div>
+                    <div id="statusBanner" class="status-banner banner-success" role="alert">
+                        <div class="banner-icon" id="bannerIcon" aria-hidden="true">✅</div>
                         <div>
                             <h3 id="bannerTitle" class="banner-title">ACCESS GRANTED</h3>
                             <p id="bannerMessage" class="banner-desc">Meal recorded successfully.</p>
@@ -177,8 +197,8 @@
                     <div class="student-profile" id="studentProfile">
                         <div class="profile-header">
                             <div class="avatar-wrapper">
-                                <img id="studentPhoto" src="" alt="Student photo" class="student-avatar" style="display: none;">
-                                <div id="studentAvatarFallback" class="avatar-fallback">ST</div>
+                                <img id="studentPhoto" src="" alt="Photo of enrolled resident" class="student-avatar" style="display: none;">
+                                <div id="studentAvatarFallback" class="avatar-fallback" aria-hidden="true">ST</div>
                             </div>
                             <div class="profile-identity">
                                 <h3 id="studentName" class="student-name">--</h3>
@@ -202,7 +222,7 @@
                             <div class="detail-item">
                                 <span class="detail-label">Attendance Status</span>
                                 <span class="detail-value" id="lunchStatusBadge">
-                                    <span class="badge badge-success">Recorded</span>
+                                    <span class="badge badge-success">Recorded ✅</span>
                                 </span>
                             </div>
                             <div class="detail-item">
@@ -220,14 +240,14 @@
 
                     <!-- Manual Ready Action -->
                     <div class="result-footer">
-                        <button id="resetScannerBtn" class="btn btn-outline full-width">
+                        <button id="resetScannerBtn" class="btn btn-outline full-width" aria-label="Reset scanner for the next student">
                             Ready for Next Student Now
                         </button>
                     </div>
                 </div>
 
                 <!-- Today's Quick Tally Banner -->
-                <div class="quick-stats-footer">
+                <div class="quick-stats-footer" role="region" aria-label="Today's meal service statistics">
                     <div class="stat-bubble">
                         <span class="stat-number" id="todayBreakfastCount">0</span>
                         <span class="stat-label">Breakfasts Served</span>
@@ -245,10 +265,89 @@
         </div>
     </main>
 
-    <footer class="app-footer">
-        <p>AI-Powered Hostel Food Management System &bull; 3D Biometric Recognition &bull; Google-Inspired Design</p>
+    <!-- Accessible Alternative Modal: Manual ID Entry -->
+    <div id="manualEntryModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="manualModalTitle" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:999;align-items:center;justify-content:center;">
+        <div class="modal-card card" style="max-width:480px;width:90%;margin:auto;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:1.5rem;">
+            <div class="card-header">
+                <h3 id="manualModalTitle" class="card-title">⌨️ Alternative: Manual ID Entry</h3>
+                <button type="button" class="btn btn-small btn-secondary" onclick="closeManualModal()" aria-label="Close manual entry dialog">✕</button>
+            </div>
+            <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:1rem;">
+                If face scanning is not accessible or recognition was unsuccessful, enter your registered Student ID or SRN below:
+            </p>
+            <form id="manualVerifyForm" onsubmit="handleManualVerification(event)">
+                <div class="form-group" style="margin-bottom:1rem;">
+                    <label for="manualStudentId" style="display:block;margin-bottom:0.35rem;font-weight:600;">Student ID or SRN <span class="required">*</span></label>
+                    <input type="text" id="manualStudentId" placeholder="e.g. 1XX23AIML001" required style="width:100%;padding:0.6rem;background:var(--bg-surface-elevated);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);">
+                </div>
+                <div id="manualAlert" class="alert-box" role="alert" style="display:none;margin-bottom:1rem;"></div>
+                <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeManualModal()">Cancel</button>
+                    <button type="submit" id="manualSubmitBtn" class="btn btn-primary">Verify & Record Meal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <footer class="app-footer" role="contentinfo">
+        <p>AI-Powered Hostel Food Management System &bull; 3D Biometric Recognition &bull; WCAG 2.2 AA Accessible</p>
     </footer>
 
-    <script src="/static/js/main.js?v=3.0"></script>
+    <script src="/static/js/main.js?v=3.1"></script>
+    <script>
+        function openManualModal() {
+            const modal = document.getElementById('manualEntryModal');
+            modal.style.display = 'flex';
+            document.getElementById('manualStudentId').focus();
+        }
+        function closeManualModal() {
+            document.getElementById('manualEntryModal').style.display = 'none';
+            document.getElementById('openManualEntryBtn').focus();
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('manualEntryModal').style.display === 'flex') {
+                closeManualModal();
+            }
+        });
+        async function handleManualVerification(e) {
+            e.preventDefault();
+            const idVal = document.getElementById('manualStudentId').value.trim();
+            const alertBox = document.getElementById('manualAlert');
+            const btn = document.getElementById('manualSubmitBtn');
+            if (!idVal) return;
+            btn.disabled = true;
+            btn.textContent = 'Verifying...';
+            alertBox.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/scan-manual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ identifier: idVal })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alertBox.textContent = `✅ ${data.message}`;
+                    alertBox.className = 'alert-box alert-success';
+                    alertBox.style.display = 'block';
+                    setTimeout(() => {
+                        closeManualModal();
+                        if (typeof updateStats === 'function') updateStats();
+                    }, 1500);
+                } else {
+                    alertBox.textContent = `❌ ${data.message || 'Verification rejected.'}`;
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.style.display = 'block';
+                }
+            } catch (err) {
+                alertBox.textContent = '❌ Network error during verification.';
+                alertBox.className = 'alert-box alert-danger';
+                alertBox.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Verify & Record Meal';
+            }
+        }
+    </script>
 </body>
 </html>
