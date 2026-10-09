@@ -289,6 +289,7 @@ def register_routes(app):
     @app.route('/login')
     def login_page():
         """User login page (both admin and student)."""
+        get_csrf_token()
         if session.get('role') == 'admin':
             return redirect(url_for('admin_dashboard'))
         elif session.get('role') == 'student':
@@ -309,12 +310,14 @@ def register_routes(app):
     @admin_required
     def admin_dashboard():
         """Admin management dashboard."""
+        get_csrf_token()
         return render_template('admin.html')
 
     @app.route('/student')
     @student_required
     def student_dashboard():
         """Student private self-service dashboard."""
+        get_csrf_token()
         return render_template('student.html')
 
     # ------------------------------------------
@@ -344,8 +347,9 @@ def register_routes(app):
             session['role'] = 'admin'
             session['username'] = admin.username
             session['user_id'] = admin.id
+            csrf_token = get_csrf_token()
             log_audit(f"Admin login: {admin.username}", target_type="auth", target_id=admin.username)
-            return jsonify({'success': True, 'role': 'admin', 'redirect': '/admin'})
+            return jsonify({'success': True, 'role': 'admin', 'redirect': '/admin', 'csrf_token': csrf_token})
 
         elif role == 'student':
             # Allow login using either Student ID or SRN
@@ -377,7 +381,8 @@ def register_routes(app):
             session['student_id'] = student.student_id
             session['username'] = student.name
             session['user_id'] = student.id
-            return jsonify({'success': True, 'role': 'student', 'redirect': '/student'})
+            csrf_token = get_csrf_token()
+            return jsonify({'success': True, 'role': 'student', 'redirect': '/student', 'csrf_token': csrf_token})
 
         return jsonify({'success': False, 'message': 'Invalid role specified.'}), 400
 

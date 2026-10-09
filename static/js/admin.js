@@ -1,5 +1,105 @@
 // AI Hostel Food Management System - Admin Dashboard Client
 
+// ==========================================
+// CSRF PROTECTION HELPER & FETCH INTERCEPTOR
+// ==========================================
+function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.content) return meta.content;
+    const input = document.querySelector('input[name="csrf_token"]');
+    if (input && input.value) return input.value;
+    return '';
+}
+
+async function refreshCsrfToken() {
+    try {
+        const res = await _nativeFetch('/api/auth/csrf');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.csrf_token) {
+                let meta = document.querySelector('meta[name="csrf-token"]');
+                if (!meta) {
+                    meta = document.createElement('meta');
+                    meta.name = 'csrf-token';
+                    document.head.appendChild(meta);
+                }
+                meta.content = data.csrf_token;
+                document.querySelectorAll('input[name="csrf_token"]').forEach(inp => {
+                    inp.value = data.csrf_token;
+                });
+                return data.csrf_token;
+            }
+        }
+    } catch (e) {
+        console.warn('Unable to refresh CSRF token:', e);
+    }
+    return '';
+}
+
+// Automatically attach X-CSRF-Token to non-GET fetch calls & auto-refresh on 403
+const _nativeFetch = window.fetch;
+window.fetch = async function(resource, init = {}) {
+    init = init || {};
+    const method = (init.method || 'GET').toUpperCase();
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        let token = getCsrfToken();
+        if (!token) {
+            token = await refreshCsrfToken();
+        }
+        if (token) {
+            init.headers = init.headers || {};
+            if (init.headers instanceof Headers) {
+                if (!init.headers.has('X-CSRF-Token')) {
+                    init.headers.set('X-CSRF-Token', token);
+                }
+            } else if (Array.isArray(init.headers)) {
+                if (!init.headers.some(([k]) => k.toLowerCase() === 'x-csrf-token')) {
+                    init.headers.push(['X-CSRF-Token', token]);
+                }
+            } else {
+                if (!init.headers['X-CSRF-Token'] && !init.headers['x-csrf-token']) {
+                    init.headers['X-CSRF-Token'] = token;
+                }
+            }
+        }
+    }
+
+    let response = await _nativeFetch.call(this, resource, init);
+
+    // If 403 CSRF validation failure is returned, refresh token and retry once
+    if (response.status === 403 && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const clone = response.clone();
+        const errJson = await clone.json().catch(() => null);
+        if (errJson && errJson.message && errJson.message.toLowerCase().includes('csrf')) {
+            console.warn('CSRF validation rejected; refreshing token and retrying request...');
+            const freshToken = await refreshCsrfToken();
+            if (freshToken) {
+                if (init.headers instanceof Headers) {
+                    init.headers.set('X-CSRF-Token', freshToken);
+                } else if (Array.isArray(init.headers)) {
+                    init.headers = init.headers.filter(([k]) => k.toLowerCase() !== 'x-csrf-token');
+                    init.headers.push(['X-CSRF-Token', freshToken]);
+                } else {
+                    init.headers['X-CSRF-Token'] = freshToken;
+                }
+                if (init.body && typeof init.body === 'string') {
+                    try {
+                        const parsed = JSON.parse(init.body);
+                        if (parsed && typeof parsed === 'object') {
+                            parsed.csrf_token = freshToken;
+                            init.body = JSON.stringify(parsed);
+                        }
+                    } catch (_) {}
+                }
+                response = await _nativeFetch.call(this, resource, init);
+            }
+        }
+    }
+
+    return response;
+};
+
 let allStudentsList = [];
 let adminStream = null;
 let capturedPhotoData = null;
@@ -392,7 +492,13 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.disabled = true;
         submitBtn.textContent = 'Enrolling Student...';
 
+        let token = getCsrfToken();
+        if (!token) {
+            token = await refreshCsrfToken();
+        }
+
         const payload = {
+            csrf_token: token,
             student_id: document.getElementById('studentId').value.trim().toUpperCase(),
             name: document.getElementById('studentName').value.trim(),
             srn: document.getElementById('studentSrn').value.trim().toUpperCase(),
@@ -412,7 +518,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/students/register', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': token
+                },
                 body: JSON.stringify(payload)
             });
             const data = await res.json();
@@ -420,7 +529,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 regStatusAlert.className = 'alert-box alert-success';
                 regStatusAlert.textContent = `✅ ${data.message}`;
                 regStatusAlert.style.display = 'block';
+                const curToken = getCsrfToken();
                 registerForm.reset();
+                const regCsrf = document.getElementById('regCsrfToken');
+                if (regCsrf && curToken) regCsrf.value = curToken;
                 retakeFacePhoto();
                 loadStudents();
                 loadMetrics();

@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Admin Dashboard | AI Hostel Food Management</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,6 +111,7 @@
                     </div>
 
                     <form id="registerForm" class="registration-form">
+                        <input type="hidden" name="csrf_token" id="regCsrfToken" value="{{ csrf_token() }}">
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="studentId">Student ID <span class="required">*</span></label>
@@ -245,6 +247,7 @@
                     </div>
                     <p class="section-hint">Use this alternative workflow when camera hardware is unavailable or student face cannot be scanned.</p>
                     <form id="manualVerifyForm">
+                        <input type="hidden" name="csrf_token" id="manualCsrfToken" value="{{ csrf_token() }}">
                         <div class="form-group">
                             <label for="manualStudentId">Student ID or SRN</label>
                             <input type="text" id="manualStudentId" placeholder="e.g. 1XX23AIML001" required>
@@ -324,6 +327,7 @@
                         <h2 class="card-title">💵 Record Hostel Fee Payment</h2>
                     </div>
                     <form id="paymentRecordForm">
+                        <input type="hidden" name="csrf_token" id="payCsrfToken" value="{{ csrf_token() }}">
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="payStudentId">Student ID or SRN <span class="required">*</span></label>
@@ -430,6 +434,7 @@
                         <h2 class="card-title">🌅 Breakfast Menu & Schedule</h2>
                     </div>
                     <form id="bfMenuForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="form-group">
                             <label for="bfMenuItems">Menu Items (comma-separated)</label>
                             <textarea id="bfMenuItems" rows="4" style="width:100%;background:var(--bg-surface-elevated);color:white;border:1px solid var(--border-color);padding:0.5rem;border-radius:var(--radius-sm);"></textarea>
@@ -456,6 +461,7 @@
                         <h2 class="card-title">☀️ Lunch Menu & Schedule</h2>
                     </div>
                     <form id="lunchMenuForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="form-group">
                             <label for="lunchMenuItems">Menu Items (comma-separated)</label>
                             <textarea id="lunchMenuItems" rows="4" style="width:100%;background:var(--bg-surface-elevated);color:white;border:1px solid var(--border-color);padding:0.5rem;border-radius:var(--radius-sm);"></textarea>

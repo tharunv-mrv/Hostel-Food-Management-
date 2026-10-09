@@ -43,6 +43,7 @@ TEST 37: Templates contain accessibility landmarks, skip links, table captions, 
 TEST 38: HTTP responses enforce defense-in-depth security headers and CSRF endpoint returns token.
 TEST 39: Sensitive endpoints enforce sliding-window rate limiting when enabled.
 TEST 40: Custom error handlers sanitize 404, 403, and 400 API responses without leaking internals.
+TEST 41: End-to-end CSRF validation during student registration across all security scenarios.
 """
 
 import unittest
@@ -1007,6 +1008,145 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
         data_400 = res_400.get_json()
         self.assertFalse(data_400.get('success'))
         self.assertIn('Unknown module', data_400.get('message'))
+
+    def test_41_student_registration_csrf_validation_suite(self):
+        """TEST 41: End-to-end CSRF validation during student registration across all security scenarios."""
+        # Create an app instance with CSRF_ENABLED=True and TESTING=False to test actual middleware
+        csrf_app = create_app({
+            'TESTING': False,
+            'CSRF_ENABLED': True,
+            'RATE_LIMIT_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SQLALCHEMY_ENGINE_OPTIONS': {
+                'poolclass': StaticPool,
+                'connect_args': {'check_same_thread': False}
+            },
+            'SECRET_KEY': 'csrf-test-secret-key'
+        })
+        with csrf_app.app_context():
+            db.create_all()
+            if not AdminUser.query.filter_by(username='admin').first():
+                admin = AdminUser(username='admin', email='admin@canteen.edu', role='admin')
+                admin.set_password('Admin@123')
+                db.session.add(admin)
+                db.session.commit()
+
+            with csrf_app.test_client() as client:
+                # 1. Login as admin
+                login_res = client.post('/api/auth/login', json={
+                    'role': 'admin',
+                    'username': 'admin',
+                    'password': 'Admin@123'
+                })
+                self.assertEqual(login_res.status_code, 200)
+                login_data = login_res.get_json()
+                self.assertTrue(login_data['success'])
+                csrf_token = login_data.get('csrf_token')
+                self.assertIsNotNone(csrf_token)
+                self.assertEqual(len(csrf_token), 64)
+
+                # 2. Open admin page and verify CSRF token and hidden input are rendered in template
+                admin_page_res = client.get('/admin')
+                self.assertEqual(admin_page_res.status_code, 200)
+                self.assertIn(f'name="csrf-token" content="{csrf_token}"'.encode(), admin_page_res.data)
+                self.assertIn(b'id="regCsrfToken"', admin_page_res.data)
+
+                # 3. Scenario A: Submit registration WITHOUT CSRF token -> MUST FAIL with 403
+                res_no_csrf = client.post('/api/students/register', json={
+                    'student_id': 'CSRF001',
+                    'name': 'No Csrf Student',
+                    'phone_number': '9876543210'
+                })
+                self.assertEqual(res_no_csrf.status_code, 403)
+                data_no_csrf = res_no_csrf.get_json()
+                self.assertFalse(data_no_csrf['success'])
+                self.assertIn('CSRF validation failed', data_no_csrf['message'])
+                # Verify student was NOT saved in database
+                self.assertIsNone(Student.query.filter_by(student_id='CSRF001').first())
+
+                # 4. Scenario B: Submit registration with INVALID CSRF token -> MUST FAIL with 403
+                res_bad_csrf = client.post('/api/students/register', headers={
+                    'X-CSRF-Token': 'invalid-token-1234567890abcdef'
+                }, json={
+                    'student_id': 'CSRF002',
+                    'name': 'Bad Csrf Student',
+                    'phone_number': '9876543210'
+                })
+                self.assertEqual(res_bad_csrf.status_code, 403)
+                data_bad_csrf = res_bad_csrf.get_json()
+                self.assertFalse(data_bad_csrf['success'])
+                self.assertIn('CSRF validation failed', data_bad_csrf['message'])
+
+                # 5. Scenario C: Submit registration WITH VALID CSRF header -> MUST SUCCEED with 200
+                res_valid_header = client.post('/api/students/register', headers={
+                    'X-CSRF-Token': csrf_token
+                }, json={
+                    'student_id': 'CSRF003',
+                    'name': 'Valid Header Student',
+                    'srn': 'SRN-CSRF003',
+                    'phone_number': '9876543210',
+                    'hostel': 'Kaveri Hostel',
+                    'room_number': '201',
+                    'total_hostel_fees': 75000.0,
+                    'total_fees_paid': 25000.0
+                })
+                self.assertEqual(res_valid_header.status_code, 201)
+                data_valid = res_valid_header.get_json()
+                self.assertTrue(data_valid['success'])
+                # Verify student is properly saved in database with all details
+                saved_student = Student.query.filter_by(student_id='CSRF003').first()
+                self.assertIsNotNone(saved_student)
+                self.assertEqual(saved_student.name, 'Valid Header Student')
+                self.assertEqual(saved_student.pending_fees, 50000.0)
+
+                # 6. Scenario D: Duplicate student registration prevented -> MUST FAIL with 400
+                res_duplicate = client.post('/api/students/register', headers={
+                    'X-CSRF-Token': csrf_token
+                }, json={
+                    'student_id': 'CSRF003',
+                    'name': 'Duplicate Student',
+                    'phone_number': '9876543210'
+                })
+                self.assertEqual(res_duplicate.status_code, 400)
+                self.assertIn('already registered', res_duplicate.get_json()['message'])
+
+                # 7. Scenario E: Submit registration with CSRF token in JSON body -> MUST SUCCEED with 201
+                res_valid_body = client.post('/api/students/register', json={
+                    'csrf_token': csrf_token,
+                    'student_id': 'CSRF004',
+                    'name': 'Valid Body Student',
+                    'phone_number': '9876543210',
+                    'hostel': 'Kaveri Hostel',
+                    'room_number': '202'
+                })
+                self.assertEqual(res_valid_body.status_code, 201)
+                self.assertTrue(res_valid_body.get_json()['success'])
+                self.assertIsNotNone(Student.query.filter_by(student_id='CSRF004').first())
+
+                # 8. Scenario F: Refreshing token via /api/auth/csrf and submitting again
+                refresh_res = client.get('/api/auth/csrf')
+                self.assertEqual(refresh_res.status_code, 200)
+                refreshed_token = refresh_res.get_json()['csrf_token']
+                res_after_refresh = client.post('/api/students/register', headers={
+                    'X-CSRF-Token': refreshed_token
+                }, json={
+                    'student_id': 'CSRF005',
+                    'name': 'After Refresh Student',
+                    'phone_number': '9876543210'
+                })
+                self.assertEqual(res_after_refresh.status_code, 201)
+                self.assertTrue(res_after_refresh.get_json()['success'])
+
+                # 9. Scenario G: Session logout / expiration -> request rejected
+                client.get('/logout')
+                res_logged_out = client.post('/api/students/register', headers={
+                    'X-CSRF-Token': csrf_token
+                }, json={
+                    'student_id': 'CSRF006',
+                    'name': 'Expired Session Student',
+                    'phone_number': '9876543210'
+                })
+                self.assertIn(res_logged_out.status_code, (401, 403))
 
 
 if __name__ == '__main__':
