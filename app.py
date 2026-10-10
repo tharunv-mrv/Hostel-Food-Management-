@@ -12,7 +12,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config
 from models import (
     db, AdminUser, Student, FeePayment, MealMenu, FoodEntry, RejectedAttempt, SmsLog, DailyReport, AuditLog,
-    ArchivedFoodEntry, ArchivedRejectedAttempt, ArchivedSmsLog, ArchivedAuditLog, migrate_database
+    ArchivedFoodEntry, ArchivedRejectedAttempt, ArchivedSmsLog, ArchivedAuditLog, migrate_database, flush_sqlite_to_disk
 )
 from face_service import face_service
 from sms_service import send_meal_sms_async
@@ -218,11 +218,15 @@ def register_routes(app):
 
     @app.after_request
     def add_security_headers(response):
-        """Inject defense-in-depth HTTP security headers."""
+        """Inject defense-in-depth HTTP security headers and prevent stale API caching."""
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        if request.path.startswith('/api/') or request.path in ('/', '/admin', '/student', '/login'):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
         return response
 
     @app.errorhandler(400)
@@ -523,6 +527,7 @@ def register_routes(app):
         try:
             db.session.add(entry)
             db.session.commit()
+            flush_sqlite_to_disk()
         except Exception as e:
             db.session.rollback()
             return jsonify({
@@ -592,6 +597,7 @@ def register_routes(app):
             )
             db.session.add(rej)
             db.session.commit()
+            flush_sqlite_to_disk()
             return jsonify({'success': False, 'status': status_code, 'message': reason_msg, 'student': student.to_dict()}), 200
 
         now = datetime.now()
@@ -610,6 +616,7 @@ def register_routes(app):
         try:
             db.session.add(entry)
             db.session.commit()
+            flush_sqlite_to_disk()
         except Exception:
             db.session.rollback()
             return jsonify({'success': False, 'status': 'already_recorded', 'message': f"{meal_type} already recorded today."}), 200
@@ -777,29 +784,35 @@ def register_routes(app):
             total_hostel_fees=total_hostel_fees,
             total_fees_paid=initial_fees_paid,
             last_payment_date=datetime.now().strftime('%Y-%m-%d') if initial_fees_paid > 0 else None,
-            face_encoding=json.dumps(encoding) if encoding else None,
-            photo_preview=thumbnail,
+            face_encoding=json.dumps(encoding) if encoding else "",
+            photo_preview=thumbnail or "",
             active=True,
             meal_access_enabled=True
         )
         student.set_password(current_app.config.get('DEFAULT_STUDENT_PASSWORD', 'Student@123'))
-        db.session.add(student)
-        db.session.commit()
-
-        # Record initial payment record if amount > 0
-        if initial_fees_paid > 0:
-            pay_rec = FeePayment(
-                student_id=student_id,
-                student_name=name,
-                amount=initial_fees_paid,
-                payment_date=datetime.now().strftime('%Y-%m-%d'),
-                payment_method='Initial Registration',
-                reference_no='REG-PAY-001',
-                remarks='Initial payment at registration',
-                created_by=session.get('username') or 'Admin'
-            )
-            db.session.add(pay_rec)
+        try:
+            db.session.add(student)
+            # Record initial payment record if amount > 0
+            if initial_fees_paid > 0:
+                pay_rec = FeePayment(
+                    student_id=student_id,
+                    student_name=name,
+                    amount=initial_fees_paid,
+                    payment_date=datetime.now().strftime('%Y-%m-%d'),
+                    payment_method='Initial Registration',
+                    reference_no='REG-PAY-001',
+                    remarks='Initial payment at registration',
+                    created_by=session.get('username') or 'Admin'
+                )
+                db.session.add(pay_rec)
             db.session.commit()
+            flush_sqlite_to_disk()
+            db_target = current_app.config.get('SQLALCHEMY_DATABASE_URI', current_app.config.get('DB_FILE_PATH'))
+            total_students = Student.query.count()
+            print(f"[Persistence] Registered student {student_id} in {db_target} | Total students on disk: {total_students}")
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'success': False, 'message': f'Database error while saving student: {str(e)}'}), 500
 
         log_audit(f"Student enrolled: {name} ({student_id})", target_type="student", target_id=student_id)
         return jsonify({
@@ -831,6 +844,7 @@ def register_routes(app):
         if 'hostel' in data: student.hostel = data['hostel']
 
         db.session.commit()
+        flush_sqlite_to_disk()
         return jsonify({'success': True, 'message': 'Student profile updated.', 'student': student.to_dict()})
 
     @app.route('/api/students/<student_id>/toggle-active', methods=['POST'])
@@ -843,6 +857,7 @@ def register_routes(app):
 
         student.active = not student.active
         db.session.commit()
+        flush_sqlite_to_disk()
         log_audit(f"Toggled active status for {student_id} to {student.active}", target_type="student", target_id=student_id)
         return jsonify({
             'success': True,
@@ -864,6 +879,7 @@ def register_routes(app):
         student.meal_restriction_reason = reason if not student.meal_access_enabled else 'None'
 
         db.session.commit()
+        flush_sqlite_to_disk()
         log_audit(f"Toggled meal access for {student_id} to {student.meal_access_enabled}. Reason: {reason}", target_type="access", target_id=student_id)
         return jsonify({
             'success': True,
@@ -895,6 +911,7 @@ def register_routes(app):
         student.face_encoding = json.dumps(encoding)
         student.photo_preview = thumbnail
         db.session.commit()
+        flush_sqlite_to_disk()
 
         log_audit(f"Face biometrics enrolled/updated for student {student_id}", target_type="biometrics", target_id=student_id)
         return jsonify({'success': True, 'message': f"Face enrolled successfully for {student.name}."})
@@ -907,9 +924,10 @@ def register_routes(app):
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
-        student.face_encoding = None
-        student.photo_preview = None
+        student.face_encoding = ""
+        student.photo_preview = ""
         db.session.commit()
+        flush_sqlite_to_disk()
 
         log_audit(f"Face biometrics removed for student {student_id}", target_type="biometrics", target_id=student_id)
         return jsonify({'success': True, 'message': f"Face enrollment cleared for {student_id}."})
@@ -917,15 +935,29 @@ def register_routes(app):
     @app.route('/api/students/<student_id>', methods=['DELETE'])
     @admin_required
     def delete_student(student_id):
-        """Delete student record."""
+        """Delete student record and clean up associated records within a single transaction."""
         student = Student.query.filter_by(student_id=student_id).first()
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
-        db.session.delete(student)
-        db.session.commit()
-        log_audit(f"Deleted student {student_id}", target_type="student", target_id=student_id)
-        return jsonify({'success': True, 'message': f'Student {student_id} deleted successfully.'})
+        try:
+            # Delete associated records to prevent orphaned entries in fees, meals, and logs
+            FeePayment.query.filter_by(student_id=student_id).delete()
+            FoodEntry.query.filter_by(student_id=student_id).delete()
+            RejectedAttempt.query.filter_by(student_id=student_id).delete()
+            SmsLog.query.filter_by(student_id=student_id).delete()
+
+            db.session.delete(student)
+            db.session.commit()
+            flush_sqlite_to_disk()
+            db_target = current_app.config.get('SQLALCHEMY_DATABASE_URI', current_app.config.get('DB_FILE_PATH'))
+            total_students = Student.query.count()
+            print(f"[Persistence] Deleted student {student_id} from {db_target} | Total students on disk: {total_students}")
+            log_audit(f"Deleted student {student_id}", target_type="student", target_id=student_id)
+            return jsonify({'success': True, 'message': f'Student {student_id} deleted successfully.'})
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'success': False, 'message': f'Failed to delete student: {str(e)}'}), 500
 
     # ------------------------------------------
     # FEE MANAGEMENT APIS
@@ -967,6 +999,7 @@ def register_routes(app):
         student.total_fees_paid += amount
         student.last_payment_date = payment_date
         db.session.commit()
+        flush_sqlite_to_disk()
 
         log_audit(f"Recorded fee payment of ₹{amount:.2f} for {student_id} ({payment_method})", target_type="fee", target_id=student_id)
 
@@ -1576,6 +1609,8 @@ def register_routes(app):
         target = data.get('target', 'entries')
 
         if target == 'all':
+            from backup_service import create_database_backup
+            create_database_backup(label="pre_reset_safety", app=current_app)
             FoodEntry.query.delete()
             FeePayment.query.delete()
             RejectedAttempt.query.delete()
@@ -1592,9 +1627,53 @@ def register_routes(app):
             'message': f"Database ({'all records' if target == 'all' else 'food entries'}) reset successfully."
         })
 
+    # ------------------------------------------
+    # DATABASE BACKUP & PERSISTENCE APIS
+    # ------------------------------------------
+
+    @app.route('/api/admin/backups', methods=['GET'])
+    @admin_required
+    def get_database_backups():
+        """List all available database snapshots and storage statistics."""
+        from backup_service import list_backups
+        backups = list_backups()
+        return jsonify({'success': True, 'backups': backups, 'count': len(backups)})
+
+    @app.route('/api/admin/backups/create', methods=['POST'])
+    @admin_required
+    def trigger_database_backup():
+        """Create an on-demand, transactional database snapshot."""
+        from backup_service import create_database_backup
+        data = request.get_json() or {}
+        label = data.get('label', 'manual')
+        res = create_database_backup(label=label, app=current_app)
+        if res.get('success'):
+            log_audit(f"Created manual database backup: {res.get('backup_file')}", target_type="backup")
+            return jsonify(res), 200
+        return jsonify(res), 500
+
+    @app.route('/api/admin/backups/restore', methods=['POST'])
+    @admin_required
+    def restore_database_backup():
+        """Restore database from a selected backup snapshot."""
+        from backup_service import restore_database_from_backup
+        data = request.get_json() or {}
+        backup_file = data.get('backup_file')
+        if not backup_file:
+            return jsonify({'success': False, 'message': 'Backup filename required.'}), 400
+        res = restore_database_from_backup(backup_file, app=current_app)
+        if res.get('success'):
+            log_audit(f"Restored database from snapshot: {backup_file}", target_type="backup")
+            return jsonify(res), 200
+        return jsonify(res), 500
+
+
+_startup_initialized = False
+
 
 def create_app(test_config=None):
     """Application factory for Hostel Food Management System."""
+    global _startup_initialized
     app = Flask(__name__)
     app.config.from_object(Config)
 
@@ -1602,13 +1681,23 @@ def create_app(test_config=None):
         app.config.update(test_config)
 
     os.makedirs(app.instance_path, exist_ok=True)
+    os.makedirs(app.config.get('BACKUP_DIR', os.path.join(app.instance_path, 'backups')), exist_ok=True)
     os.makedirs(app.config.get('REPORTS_DIR', 'reports'), exist_ok=True)
     db.init_app(app)
 
     register_routes(app)
 
-    # Automatic schema migration & default administrator setup
-    if not app.config.get('TESTING'):
+    # Automatic schema migration, startup backup & persistence check
+    if not app.config.get('TESTING') and not _startup_initialized:
+        _startup_initialized = True
+        try:
+            from backup_service import create_database_backup
+            b_res = create_database_backup(label="startup", app=app)
+            if b_res.get('success'):
+                print(f"[Backup] Startup snapshot preserved: {b_res['backup_file']}")
+        except Exception as e:
+            print(f"[Backup] Startup note: {e}")
+
         migrate_database(app)
 
     return app

@@ -1148,7 +1148,372 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
                 })
                 self.assertIn(res_logged_out.status_code, (401, 403))
 
+    def test_42_database_persistence_and_backup_endpoints(self):
+        """TEST 42: Automated database backup and persistence endpoints verify system snapshots."""
+        self._login_as_admin()
+
+        # 1. Non-admin access rejected
+        with self.app.test_client() as unauth_client:
+            res_unauth = unauth_client.get('/api/admin/backups')
+            self.assertEqual(res_unauth.status_code, 403)
+
+        # 2. Admin retrieves backup list
+        res_list = self.client.get('/api/admin/backups')
+        self.assertEqual(res_list.status_code, 200)
+        data_list = res_list.get_json()
+        self.assertTrue(data_list['success'])
+        self.assertIn('backups', data_list)
+
+        # 3. Direct backup service function testing
+        from backup_service import list_backups, rotate_backups
+        backups = list_backups()
+        self.assertIsInstance(backups, list)
+        pruned = rotate_backups(max_backups=20)
+        self.assertIsInstance(pruned, int)
+
+    def test_43_student_registration_persistence_across_app_restarts_and_deletion(self):
+        """TEST 43: Register student, delete student, restart app, verify disk persistence, no duplicates, and real subprocess restart."""
+        import tempfile
+        import sqlite3
+        import subprocess
+        import sys
+
+        temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        temp_db_path = os.path.abspath(temp_db.name)
+        temp_db.close()
+
+        uri = f"sqlite:///{temp_db_path.replace(os.sep, '/')}"
+
+        cfg = {
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': uri,
+            'SECRET_KEY': 'test-secret-persistence',
+            'ENFORCE_MEAL_HOURS': False,
+            'ENFORCE_LUNCH_HOURS': False,
+            'FEE_POLICY_ENFORCED': False,
+            'DEFAULT_ADMIN_USERNAME': 'admin',
+            'DEFAULT_ADMIN_PASSWORD': 'Admin@123',
+            'SMS_PROVIDER': 'mock'
+        }
+
+        try:
+            # === PHASE 1: FIRST APP LIFECYCLE (REGISTRATION & DELETION) ===
+            app1 = create_app(cfg)
+            with app1.app_context():
+                db.create_all()
+                admin = AdminUser(username='admin', email='admin@canteen.edu', role='admin')
+                admin.set_password('Admin@123')
+                db.session.add(admin)
+                db.session.commit()
+
+            with app1.test_client() as client1:
+                # Login as admin
+                l_res = client1.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+                self.assertEqual(l_res.status_code, 200)
+                csrf1 = l_res.get_json().get('csrf_token')
+                hdrs = {'X-CSRFToken': csrf1}
+
+                # Register student A (To be kept and verified)
+                res_a = client1.post('/api/students/register', json={
+                    'student_id': 'TESTPERSIST001',
+                    'name': 'Persistent Student',
+                    'srn': 'PES12026001',
+                    'phone_number': '9845012345',
+                    'branch': 'CSE',
+                    'year': '2nd Year',
+                    'hostel': 'Ganga Hostel',
+                    'room_number': 'R101',
+                    'room_sharing_type': 'Double',
+                    'room_occupants': 2,
+                    'total_hostel_fees': 75000.0,
+                    'total_fees_paid': 35000.0
+                }, headers=hdrs)
+                self.assertEqual(res_a.status_code, 201)
+
+                # Register student B (To be deleted)
+                res_b = client1.post('/api/students/register', json={
+                    'student_id': 'TESTPERSIST002',
+                    'name': 'Temporary Student',
+                    'srn': 'PES12026002',
+                    'phone_number': '9845099999',
+                    'branch': 'ECE',
+                    'year': '1st Year',
+                    'hostel': 'Kaveri Hostel',
+                    'room_number': 'K202',
+                    'total_hostel_fees': 75000.0,
+                    'total_fees_paid': 20000.0
+                }, headers=hdrs)
+                self.assertEqual(res_b.status_code, 201)
+
+                # Delete student B
+                del_res = client1.delete('/api/students/TESTPERSIST002', headers=hdrs)
+                self.assertEqual(del_res.status_code, 200)
+                self.assertTrue(del_res.get_json()['success'])
+
+            # Cleanly close and dispose app1 connections
+            with app1.app_context():
+                db.session.remove()
+                db.engine.dispose()
+            del app1
+
+            # === PHASE 2: DIRECT DISK INSPECTION (PRE-RESTART) ===
+            con = sqlite3.connect(temp_db_path)
+            cur = con.cursor()
+            cur.execute("SELECT student_id, name, room_number, total_fees_paid FROM students")
+            disk_rows = cur.fetchall()
+            con.close()
+
+            disk_ids = [r[0] for r in disk_rows]
+            self.assertIn('TESTPERSIST001', disk_ids)
+            self.assertNotIn('TESTPERSIST002', disk_ids)
+            row_a = next(r for r in disk_rows if r[0] == 'TESTPERSIST001')
+            self.assertEqual(row_a[1], 'Persistent Student')
+            self.assertEqual(row_a[2], 'R101')
+            self.assertEqual(row_a[3], 35000.0)
+
+            # === PHASE 3: SECOND APP LIFECYCLE (IN-PROCESS RESTART SIMULATION) ===
+            app2 = create_app(cfg)
+            self.assertEqual(app2.config['SQLALCHEMY_DATABASE_URI'], uri)
+
+            with app2.test_client() as client2:
+                # Login as admin in restarted app
+                l_res2 = client2.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+                self.assertEqual(l_res2.status_code, 200)
+
+                # List students
+                st_res = client2.get('/api/students')
+                self.assertEqual(st_res.status_code, 200)
+                st_data = st_res.get_json()
+                self.assertTrue(st_data['success'])
+                all_ids = [s['student_id'] for s in st_data['students']]
+
+                # Persistent student must exist and details must be identical
+                self.assertIn('TESTPERSIST001', all_ids)
+                s_details = next(s for s in st_data['students'] if s['student_id'] == 'TESTPERSIST001')
+                self.assertEqual(s_details['name'], 'Persistent Student')
+                self.assertEqual(s_details['room_number'], 'R101')
+                self.assertEqual(s_details['hostel'], 'Ganga Hostel')
+                self.assertEqual(s_details['total_fees_paid'], 35000.0)
+
+                # Verify student ID is NOT duplicated
+                with app2.app_context():
+                    self.assertEqual(Student.query.filter_by(student_id='TESTPERSIST001').count(), 1)
+
+                # Deleted student must NEVER reappear
+                self.assertNotIn('TESTPERSIST002', all_ids)
+                # Seed demo students must NOT have been auto-injected
+                self.assertNotIn('1XX23AIML001', all_ids)
+                self.assertNotIn('1XX23CSE042', all_ids)
+
+            with app2.app_context():
+                db.session.remove()
+                db.engine.dispose()
+            del app2
+
+            # === PHASE 4: GENUINE SEPARATE-PROCESS RESTART VERIFICATION ===
+            # Spawns a completely new operating system process running Python to verify that
+            # true process termination, memory clearance, and fresh reload preserve data.
+            sub_py_code = (
+                "import sys, os, json\n"
+                "from app import create_app, db\n"
+                "from models import Student\n"
+                f"cfg = {{'TESTING': True, 'SQLALCHEMY_DATABASE_URI': '{uri}', 'SECRET_KEY': 'test-subproc'}}\n"
+                "app = create_app(cfg)\n"
+                "with app.app_context():\n"
+                "    students = Student.query.all()\n"
+                "    s_ids = [s.student_id for s in students]\n"
+                "    assert 'TESTPERSIST001' in s_ids, f'Missing student in new process: {s_ids}'\n"
+                "    assert 'TESTPERSIST002' not in s_ids, f'Deleted student reappeared in new process: {s_ids}'\n"
+                "    assert '1XX23AIML001' not in s_ids, 'Demo student auto-seeded in new process!'\n"
+                "    s1 = Student.query.filter_by(student_id='TESTPERSIST001').first()\n"
+                "    assert s1.name == 'Persistent Student'\n"
+                "    assert s1.room_number == 'R101'\n"
+                "    assert s1.total_fees_paid == 35000.0\n"
+                "    print(json.dumps({'success': True, 'count': len(s_ids), 'students': s_ids}))\n"
+            )
+            sub_res = subprocess.run(
+                [sys.executable, "-c", sub_py_code],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            self.assertEqual(sub_res.returncode, 0, f"Subprocess restart failed: {sub_res.stderr}")
+            self.assertIn('"success": true', sub_res.stdout.lower())
+
+        finally:
+            for ext in ('', '-wal', '-shm'):
+                candidate = temp_db_path + ext
+                if os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except Exception:
+                        pass
+
+    def test_44_live_server_abrupt_taskkill_persistence(self):
+        """TEST 44: Start real HTTP server, register student over TCP, force-kill via taskkill /F, restart server, verify persistence."""
+        import tempfile
+        import sqlite3
+        import subprocess
+        import sys
+        import time
+        import urllib.request
+        import http.cookiejar
+
+        temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        temp_db_path = os.path.abspath(temp_db.name)
+        temp_db.close()
+
+        uri = f"sqlite:///{temp_db_path.replace(os.sep, '/')}"
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        port = 5099
+        base_url = f"http://127.0.0.1:{port}"
+
+        env = os.environ.copy()
+        env['DATABASE_URL'] = uri
+        env['PORT'] = str(port)
+        env['FLASK_DEBUG'] = 'False'
+
+        def wait_for_server(timeout=15.0):
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    with urllib.request.urlopen(f"{base_url}/health", timeout=1.5) as resp:
+                        if resp.status == 200:
+                            return True
+                except Exception:
+                    time.sleep(0.3)
+            return False
+
+        def force_kill_pid(pid):
+            if os.name == 'nt':
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+            else:
+                import signal
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+        proc1 = None
+        proc2 = None
+        try:
+            # 1. Start real Flask server #1 as a background OS process
+            proc1 = subprocess.Popen(
+                [sys.executable, "app.py"],
+                cwd=project_dir,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            self.assertTrue(wait_for_server(), "Real Flask server #1 failed to start on port 5099")
+
+            # 2. Authenticate and register student over real HTTP TCP connection
+            cj1 = http.cookiejar.CookieJar()
+            opener1 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj1))
+
+            login_req = urllib.request.Request(
+                f"{base_url}/api/auth/login",
+                data=json.dumps({'role': 'admin', 'username': 'admin', 'password': 'Admin@123'}).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with opener1.open(login_req, timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+                login_data = json.loads(resp.read().decode('utf-8'))
+                csrf_token = login_data['csrf_token']
+
+            reg_payload = {
+                'student_id': 'KILLTEST999',
+                'name': 'Abrupt Kill Survivor',
+                'srn': 'PES12026999',
+                'phone_number': '9845077777',
+                'branch': 'AIML',
+                'year': '3rd Year',
+                'hostel': 'Cauvery Hostel',
+                'room_number': 'K999',
+                'total_hostel_fees': 75000.0,
+                'total_fees_paid': 40000.0
+            }
+            reg_req = urllib.request.Request(
+                f"{base_url}/api/students/register",
+                data=json.dumps(reg_payload).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrf_token
+                },
+                method='POST'
+            )
+            with opener1.open(reg_req, timeout=5.0) as resp:
+                self.assertEqual(resp.status, 201)
+                reg_data = json.loads(resp.read().decode('utf-8'))
+                self.assertTrue(reg_data['success'])
+
+            # 3. Immediately force-kill server #1 with Windows taskkill /F (simulating abrupt VS Code exit)
+            force_kill_pid(proc1.pid)
+            proc1.wait(timeout=5.0)
+            proc1 = None
+
+            # 4. Inspect SQLite file on disk directly after abrupt kill
+            con = sqlite3.connect(temp_db_path)
+            cur = con.cursor()
+            cur.execute("SELECT student_id, name, room_number, total_fees_paid FROM students WHERE student_id = 'KILLTEST999'")
+            row = cur.fetchone()
+            con.close()
+            self.assertIsNotNone(row, "Student record lost after taskkill /F!")
+            self.assertEqual(row[0], 'KILLTEST999')
+            self.assertEqual(row[1], 'Abrupt Kill Survivor')
+
+            # 5. Start real Flask server #2 on the same database file
+            proc2 = subprocess.Popen(
+                [sys.executable, "app.py"],
+                cwd=project_dir,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            self.assertTrue(wait_for_server(), "Real Flask server #2 failed to start after restart")
+
+            # 6. Query GET /api/students over HTTP on restarted server #2
+            cj2 = http.cookiejar.CookieJar()
+            opener2 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj2))
+            login_req2 = urllib.request.Request(
+                f"{base_url}/api/auth/login",
+                data=json.dumps({'role': 'admin', 'username': 'admin', 'password': 'Admin@123'}).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with opener2.open(login_req2, timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+
+            with opener2.open(f"{base_url}/api/students", timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+                st_data = json.loads(resp.read().decode('utf-8'))
+                self.assertTrue(st_data['success'])
+                st_ids = [s['student_id'] for s in st_data['students']]
+                self.assertIn('KILLTEST999', st_ids)
+
+            force_kill_pid(proc2.pid)
+            proc2.wait(timeout=5.0)
+            proc2 = None
+
+        finally:
+            for p in (proc1, proc2):
+                if p is not None and p.poll() is None:
+                    force_kill_pid(p.pid)
+                    try:
+                        p.wait(timeout=3.0)
+                    except Exception:
+                        pass
+            for ext in ('', '-wal', '-shm', '-journal'):
+                candidate = temp_db_path + ext
+                if os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except Exception:
+                        pass
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

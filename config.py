@@ -1,17 +1,58 @@
 import os
 
 basedir = os.path.abspath(os.path.dirname(__file__))
+DEFAULT_DB_FILE = os.path.abspath(os.path.join(basedir, 'instance', 'hostel_food.db'))
+
+
+def resolve_database_uri() -> str:
+    """
+    Resolve and canonicalize the database URI.
+    Ensures that SQLite databases always use strict, absolute file paths anchored
+    to the project root directory (basedir), converting relative paths and normalizing
+    Windows backslashes into RFC-compliant forward slashes. This prevents data loss
+    when VS Code or terminals are launched from different working directories.
+    """
+    raw_db_url = os.environ.get('DATABASE_URL')
+    if raw_db_url:
+        raw_db_url = raw_db_url.strip()
+        # Render/Heroku compatibility: postgres:// -> postgresql://
+        if raw_db_url.startswith('postgres://'):
+            return raw_db_url.replace('postgres://', 'postgresql://', 1)
+
+        # SQLite URI normalization
+        if raw_db_url.startswith('sqlite:///'):
+            sqlite_target = raw_db_url.replace('sqlite:///', '', 1)
+            if sqlite_target == ':memory:':
+                return 'sqlite:///:memory:'
+
+            # If target is a relative path, anchor strictly to basedir
+            if not os.path.isabs(sqlite_target):
+                resolved_abs = os.path.abspath(os.path.join(basedir, sqlite_target))
+            else:
+                resolved_abs = os.path.abspath(sqlite_target)
+
+            os.makedirs(os.path.dirname(resolved_abs), exist_ok=True)
+            normalized_path = resolved_abs.replace(os.sep, '/')
+            return f"sqlite:///{normalized_path}"
+
+        return raw_db_url
+
+    # Default persistent SQLite file inside instance directory
+    os.makedirs(os.path.dirname(DEFAULT_DB_FILE), exist_ok=True)
+    normalized_default = DEFAULT_DB_FILE.replace(os.sep, '/')
+    return f"sqlite:///{normalized_default}"
+
 
 class Config:
     """Application configuration with environment variable support."""
     SECRET_KEY = os.environ.get('SECRET_KEY', 'hostel-canteen-super-secret-key-2026')
 
-    # Normalize DATABASE_URL for SQLAlchemy (Render provides postgres://, SQLAlchemy requires postgresql://)
-    raw_db_url = os.environ.get('DATABASE_URL')
-    if raw_db_url and raw_db_url.startswith('postgres://'):
-        raw_db_url = raw_db_url.replace('postgres://', 'postgresql://', 1)
-    
-    SQLALCHEMY_DATABASE_URI = raw_db_url or f"sqlite:///{os.path.join(basedir, 'instance', 'hostel_food.db')}"
+    # Primary Database & Backup Storage Paths
+    DB_FILE_PATH = DEFAULT_DB_FILE
+    BACKUP_DIR = os.path.abspath(os.path.join(basedir, 'instance', 'backups'))
+    BACKUP_RETENTION_COUNT = int(os.environ.get('BACKUP_RETENTION_COUNT', 10))
+
+    SQLALCHEMY_DATABASE_URI = resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Production Session Cookie Security

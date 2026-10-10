@@ -793,12 +793,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.deleteStudent = async (studentId) => {
-        if (!confirm(`Are you sure you want to delete student ${studentId}? Biometrics will be removed.`)) return;
+        if (!confirm(`Are you sure you want to delete student ${studentId}? Biometrics, fees, and attendance history will be removed.`)) return;
         try {
             const res = await fetch(`/api/students/${studentId}`, { method: 'DELETE' });
             const data = await res.json();
-            if (data.success) { loadStudents(); loadMetrics(); }
-        } catch (e) { alert('Failed to delete student.'); }
+            if (res.ok && data.success) {
+                loadStudents();
+                loadMetrics();
+            } else {
+                alert(data.message || 'Failed to delete student.');
+            }
+        } catch (e) {
+            alert('Failed to delete student: ' + (e.message || 'Network error'));
+        }
     };
 
     window.openStudentPay = (studentId) => {

@@ -1,9 +1,51 @@
 import json
+import sqlite3
 from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+@event.listens_for(Engine, "connect")
+def configure_sqlite_connection(dbapi_connection, connection_record):
+    """
+    Configure SQLite for maximum durability and immediate single-file disk flushing.
+    Uses journal_mode=DELETE with synchronous=FULL so every transaction commit writes
+    and fsyncs directly into the primary .db file without leaving un-checkpointed
+    .db-wal or .db-shm sidecar files on Windows when VS Code or terminals are closed.
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+            cursor.execute("PRAGMA journal_mode=DELETE;")
+            cursor.execute("PRAGMA synchronous=FULL;")
+            cursor.execute("PRAGMA foreign_keys=ON;")
+            cursor.execute("PRAGMA busy_timeout=5000;")
+        except Exception:
+            pass
+        finally:
+            cursor.close()
+
+
+def flush_sqlite_to_disk():
+    """Ensure SQLite database changes are immediately flushed to the main file on disk."""
+    try:
+        if db.engine.dialect.name == 'sqlite':
+            raw_conn = db.engine.raw_connection()
+            try:
+                cur = raw_conn.cursor()
+                cur.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                cur.close()
+                raw_conn.commit()
+            finally:
+                raw_conn.close()
+    except Exception:
+        pass
+
 
 
 class AdminUser(db.Model):
@@ -59,8 +101,8 @@ class Student(db.Model):
     last_payment_date = db.Column(db.String(15), nullable=True)
 
     # Biometrics & Access Controls
-    face_encoding = db.Column(db.Text, nullable=True)  # JSON-serialized 128-float list
-    photo_preview = db.Column(db.Text, nullable=True)   # Base64 thumbnail
+    face_encoding = db.Column(db.Text, default='', nullable=True)  # JSON-serialized 128-float list
+    photo_preview = db.Column(db.Text, default='', nullable=True)   # Base64 thumbnail
     active = db.Column(db.Boolean, default=True, nullable=False, index=True)
     meal_access_enabled = db.Column(db.Boolean, default=True, nullable=False, index=True)
     meal_restriction_reason = db.Column(db.String(255), default='None')
@@ -98,7 +140,7 @@ class Student(db.Model):
 
     @property
     def has_face_enrolled(self):
-        return bool(self.face_encoding)
+        return bool(self.face_encoding and str(self.face_encoding).strip())
 
     def to_dict(self, include_encoding=False, mask_phone=False):
         """Serialize student data for JSON response, protecting sensitive credentials."""
@@ -575,4 +617,25 @@ def migrate_database(app):
             db.session.add_all([m1, m2])
             db.session.commit()
             print("[Migration] Initialized default canteen meal menus.")
+
+        # 5. Persistence Integrity Verification & Diagnostics
+        try:
+            from sqlalchemy.engine.url import make_url
+            student_count = Student.query.count()
+            admin_count = AdminUser.query.count()
+            food_count = FoodEntry.query.count()
+            fee_count = FeePayment.query.count()
+            raw_uri = app.config.get('SQLALCHEMY_DATABASE_URI', 'Unknown')
+            if raw_uri.startswith('sqlite:'):
+                safe_uri = raw_uri
+            else:
+                try:
+                    safe_uri = make_url(raw_uri).render_as_string(hide_password=True)
+                except Exception:
+                    safe_uri = 'configured-remote-db'
+            print(f"[Persistence] Database verified: {safe_uri}")
+            print(f"[Persistence] Loaded: {student_count} students, {admin_count} admins, {food_count} food entries, {fee_count} fee payments.")
+        except Exception as e:
+            print(f"[Persistence] Diagnostic note: {e}")
+
 

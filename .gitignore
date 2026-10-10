@@ -10,7 +10,11 @@ __pycache__/
 .pytest_cache/
 
 # Local databases & environment secrets
-instance/*.db
+instance/
+safety_backup_pre_investigation/
+*.db-wal
+*.db-shm
+*.db-journal
 .env
 .env.local
 
