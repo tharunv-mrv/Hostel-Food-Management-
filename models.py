@@ -604,6 +604,34 @@ def migrate_database(app):
 
                 conn.commit()
                 conn.close()
+            else:
+                from sqlalchemy import inspect as sa_inspect, text
+                inspector = sa_inspect(db.engine)
+                if inspector.has_table('students'):
+                    existing_student_cols = {c['name'] for c in inspector.get_columns('students')}
+                    pg_student_migrations = [
+                        ("srn", "VARCHAR(50)"),
+                        ("phone_number", "VARCHAR(20)"),
+                        ("room_number", "VARCHAR(20)"),
+                        ("room_sharing_type", "VARCHAR(30) DEFAULT 'Double'"),
+                        ("room_occupants", "INTEGER DEFAULT 2"),
+                        ("admission_date", "VARCHAR(15)"),
+                        ("total_hostel_fees", "DOUBLE PRECISION DEFAULT 75000.0"),
+                        ("total_fees_paid", "DOUBLE PRECISION DEFAULT 0.0"),
+                        ("last_payment_date", "VARCHAR(15)"),
+                        ("meal_access_enabled", "BOOLEAN DEFAULT TRUE"),
+                        ("meal_restriction_reason", "VARCHAR(255) DEFAULT 'None'"),
+                        ("password_hash", "VARCHAR(255)"),
+                        ("must_change_password", "BOOLEAN DEFAULT FALSE"),
+                        ("updated_at", "TIMESTAMP")
+                    ]
+                    with db.engine.begin() as conn:
+                        for col_name, col_def in pg_student_migrations:
+                            if col_name not in existing_student_cols:
+                                conn.execute(text(f"ALTER TABLE students ADD COLUMN {col_name} {col_def};"))
+                        conn.execute(text("UPDATE students SET srn = UPPER(TRIM(student_id)) WHERE srn IS NULL OR TRIM(srn) = '';"))
+                        conn.execute(text("UPDATE students SET updated_at = created_at WHERE updated_at IS NULL AND created_at IS NOT NULL;"))
+                        conn.execute(text("UPDATE students SET must_change_password = FALSE WHERE must_change_password IS NULL;"))
         except Exception as e:
             print(f"[Migration] Note during table column verification: {e}")
 
