@@ -223,7 +223,7 @@ def register_routes(app):
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-        if request.path.startswith('/api/') or request.path in ('/', '/admin', '/student', '/login'):
+        if request.path.startswith('/api/') or request.path.startswith('/static/') or request.path in ('/', '/admin', '/student', '/login'):
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
@@ -313,9 +313,35 @@ def register_routes(app):
     @app.route('/admin')
     @admin_required
     def admin_dashboard():
-        """Admin management dashboard."""
+        """Admin management dashboard with server-rendered initial students and metrics."""
         get_csrf_token()
-        return render_template('admin.html')
+        students = Student.query.order_by(Student.created_at.desc()).all()
+        initial_students = [s.to_dict() for s in students]
+
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_entries = FoodEntry.query.filter_by(entry_date=today_str).all()
+        bf_count = sum(1 for e in today_entries if e.meal == 'Breakfast')
+        lunch_count = sum(1 for e in today_entries if e.meal == 'Lunch')
+        total_collected = round(sum(s.total_fees_paid for s in students), 2)
+        total_pending = round(sum(s.pending_fees for s in students), 2)
+        sms_count = SmsLog.query.filter(SmsLog.created_at >= datetime.now().date()).count()
+
+        initial_metrics = {
+            'total_students': len(students),
+            'today_breakfast_count': bf_count,
+            'today_lunch_count': lunch_count,
+            'total_fees_collected': total_collected,
+            'total_fees_pending': total_pending,
+            'sms_delivered_count': sms_count,
+            'paid_count': sum(1 for s in students if s.fee_status == 'PAID'),
+            'partial_count': sum(1 for s in students if s.fee_status == 'PARTIALLY PAID'),
+            'unpaid_count': sum(1 for s in students if s.fee_status == 'UNPAID')
+        }
+        return render_template(
+            'admin.html',
+            initial_students=initial_students,
+            initial_metrics=initial_metrics
+        )
 
     @app.route('/student')
     @student_required

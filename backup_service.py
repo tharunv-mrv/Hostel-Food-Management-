@@ -42,7 +42,10 @@ def create_database_backup(label: str = "auto", app=None) -> dict:
             'message': f"Database at '{db_path}' cannot be backed up (in-memory or file does not exist yet)."
         }
 
-    backup_dir = Config.BACKUP_DIR
+    if os.path.normcase(os.path.abspath(db_path)) != os.path.normcase(os.path.abspath(Config.DB_FILE_PATH)):
+        backup_dir = os.path.join(os.path.dirname(db_path), 'backups')
+    else:
+        backup_dir = Config.BACKUP_DIR
     os.makedirs(backup_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -59,7 +62,8 @@ def create_database_backup(label: str = "auto", app=None) -> dict:
         source_con.close()
 
         file_size = os.path.getsize(backup_path)
-        rotate_backups(max_backups=Config.BACKUP_RETENTION_COUNT)
+        if backup_dir == Config.BACKUP_DIR:
+            rotate_backups(max_backups=Config.BACKUP_RETENTION_COUNT)
 
         return {
             'success': True,

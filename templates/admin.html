@@ -41,7 +41,7 @@
                 <div class="metric-icon">👥</div>
                 <div class="metric-info">
                     <span class="metric-label">Enrolled Students</span>
-                    <h3 class="metric-value" id="metricTotalStudents">0</h3>
+                    <h3 class="metric-value" id="metricTotalStudents">{{ initial_metrics.total_students if initial_metrics else 0 }}</h3>
                 </div>
             </div>
 
@@ -49,7 +49,7 @@
                 <div class="metric-icon">🌅</div>
                 <div class="metric-info">
                     <span class="metric-label">Breakfast Served</span>
-                    <h3 class="metric-value highlight-number" id="metricTodayBreakfast">0</h3>
+                    <h3 class="metric-value highlight-number" id="metricTodayBreakfast">{{ initial_metrics.today_breakfast_count if initial_metrics else 0 }}</h3>
                 </div>
             </div>
 
@@ -57,7 +57,7 @@
                 <div class="metric-icon">🍲</div>
                 <div class="metric-info">
                     <span class="metric-label">Lunch Served</span>
-                    <h3 class="metric-value highlight-number" id="metricTodayLunch">0</h3>
+                    <h3 class="metric-value highlight-number" id="metricTodayLunch">{{ initial_metrics.today_lunch_count if initial_metrics else 0 }}</h3>
                 </div>
             </div>
 
@@ -65,7 +65,7 @@
                 <div class="metric-icon">💰</div>
                 <div class="metric-info">
                     <span class="metric-label">Fees Collected</span>
-                    <h3 class="metric-value text-success" id="metricFeesCollected">₹0</h3>
+                    <h3 class="metric-value text-success" id="metricFeesCollected">₹{{ "{:,.0f}".format(initial_metrics.total_fees_collected) if initial_metrics else 0 }}</h3>
                 </div>
             </div>
 
@@ -73,7 +73,7 @@
                 <div class="metric-icon">⚠️</div>
                 <div class="metric-info">
                     <span class="metric-label">Pending Dues</span>
-                    <h3 class="metric-value text-danger" id="metricFeesPending">₹0</h3>
+                    <h3 class="metric-value text-danger" id="metricFeesPending">₹{{ "{:,.0f}".format(initial_metrics.total_fees_pending) if initial_metrics else 0 }}</h3>
                 </div>
             </div>
 
@@ -81,7 +81,7 @@
                 <div class="metric-icon">📱</div>
                 <div class="metric-info">
                     <span class="metric-label">SMS Notifications</span>
-                    <h3 class="metric-value" id="metricSmsCount">0</h3>
+                    <h3 class="metric-value" id="metricSmsCount">{{ initial_metrics.sms_delivered_count if initial_metrics else 0 }}</h3>
                 </div>
             </div>
         </section>
@@ -276,7 +276,7 @@
                         <p class="section-subtitle">Search, filter by room, fee clearance, and manage biometric profiles</p>
                     </div>
                     <div class="filters-bar">
-                        <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN..." aria-label="Search students by name, ID, or SRN">
+                        <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN..." aria-label="Search students by name, ID, or SRN" autocomplete="off">
                         <select id="filterFeeStatus" aria-label="Filter students by fee status">
                             <option value="">All Fee Statuses</option>
                             <option value="PAID">PAID</option>
@@ -288,6 +288,9 @@
                             <option value="true">Active Only</option>
                             <option value="false">Inactive Only</option>
                         </select>
+                        <button type="button" id="refreshStudentsBtn" class="btn btn-outline btn-small" onclick="window.loadStudents && window.loadStudents()" title="Refresh student directory">
+                            🔄 Refresh
+                        </button>
                     </div>
                 </div>
 
@@ -309,7 +312,51 @@
                             </tr>
                         </thead>
                         <tbody id="studentsTableBody">
-                            <tr><td colspan="10" class="text-center">Loading students...</td></tr>
+                            {% if initial_students %}
+                                {% for s in initial_students %}
+                                <tr>
+                                    <td>
+                                        {% if s.photo_preview %}
+                                            <img src="{{ s.photo_preview }}" class="table-avatar" alt="{{ s.name }}">
+                                        {% else %}
+                                            <div class="avatar-wrapper" style="width:36px;height:36px;font-size:0.75rem;">{{ (s.name or 'ST')[:2] | upper }}</div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <strong style="font-family:var(--font-mono);color:var(--color-primary);">{{ s.student_id }}</strong>
+                                        <br><small style="color:var(--text-muted);">{{ s.srn or '' }}</small>
+                                    </td>
+                                    <td>{{ s.name }}<br><small style="color:var(--text-secondary);">{{ s.branch }} • {{ s.year }}</small></td>
+                                    <td>{{ s.hostel }} - R{{ s.room_number or '--' }}</td>
+                                    <td style="font-family:var(--font-mono);font-size:0.8rem;">{{ s.phone_number or '--' }}</td>
+                                    <td>
+                                        <span class="badge {% if s.fee_status == 'PAID' %}badge-success{% elif s.fee_status == 'PARTIALLY PAID' %}badge-warning{% else %}badge-danger{% endif %}">
+                                            {{ s.fee_status }}
+                                        </span>
+                                    </td>
+                                    <td style="font-family:var(--font-mono);">₹{{ "%.2f"|format(s.pending_fees or 0) }}</td>
+                                    <td>
+                                        <button class="btn btn-small {% if s.meal_access_enabled %}badge-success{% else %}badge-danger{% endif %}" onclick="toggleMealAccess('{{ s.student_id }}', {{ 'true' if s.meal_access_enabled else 'false' }})">
+                                            {{ 'Enabled ✅' if s.meal_access_enabled else 'Disabled ⛔' }}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <span class="badge {% if s.has_face_enrolled %}badge-success{% else %}badge-neutral{% endif %}">
+                                            {{ 'Enrolled' if s.has_face_enrolled else 'None' }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-small btn-secondary" onclick="openStudentPay('{{ s.student_id }}')" title="Record payment">💳</button>
+                                        <button class="btn btn-small {% if s.active %}btn-outline{% else %}badge-danger{% endif %}" onclick="toggleActive('{{ s.student_id }}')" title="Toggle active status">
+                                            {{ 'Active' if s.active else 'Inactive' }}
+                                        </button>
+                                        <button class="btn btn-small btn-outline-danger" onclick="deleteStudent('{{ s.student_id }}')" title="Delete">🗑️</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr><td colspan="10" class="text-center">No students registered yet.</td></tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
@@ -376,15 +423,15 @@
                     </div>
                     <div class="fee-collection-summary">
                         <div class="stat-bubble">
-                            <span class="stat-number" id="feeCountPaid">0</span>
+                            <span class="stat-number" id="feeCountPaid">{{ initial_metrics.paid_count if initial_metrics else 0 }}</span>
                             <span class="stat-label">Students Fully Paid</span>
                         </div>
                         <div class="stat-bubble">
-                            <span class="stat-number text-warning" id="feeCountPartial">0</span>
+                            <span class="stat-number text-warning" id="feeCountPartial">{{ initial_metrics.partial_count if initial_metrics else 0 }}</span>
                             <span class="stat-label">Partially Paid</span>
                         </div>
                         <div class="stat-bubble">
-                            <span class="stat-number text-danger" id="feeCountUnpaid">0</span>
+                            <span class="stat-number text-danger" id="feeCountUnpaid">{{ initial_metrics.unpaid_count if initial_metrics else 0 }}</span>
                             <span class="stat-label">Unpaid / Dues</span>
                         </div>
                     </div>
@@ -398,7 +445,7 @@
             <section class="card table-card" style="margin-top: 1.5rem;">
                 <div class="card-header flex-header">
                     <h2 class="card-title">💳 Student Fee Accounts Ledger</h2>
-                    <input type="text" id="feeSearchInput" placeholder="🔍 Filter student fee ledger..." aria-label="Filter student fee accounts ledger">
+                    <input type="text" id="feeSearchInput" placeholder="🔍 Filter student fee ledger..." aria-label="Filter student fee accounts ledger" autocomplete="off">
                 </div>
                 <div class="table-responsive">
                     <table class="data-table">
@@ -416,7 +463,25 @@
                             </tr>
                         </thead>
                         <tbody id="feeAccountsTableBody">
-                            <tr><td colspan="8" class="text-center">Loading fee accounts...</td></tr>
+                            {% if initial_students %}
+                                {% for s in initial_students %}
+                                <tr>
+                                    <td><strong style="font-family:var(--font-mono);color:var(--color-primary);">{{ s.student_id }}</strong></td>
+                                    <td>{{ s.name }}</td>
+                                    <td style="font-family:var(--font-mono);">₹{{ "%.2f"|format(s.total_hostel_fees or 0) }}</td>
+                                    <td style="font-family:var(--font-mono);color:var(--color-success);">₹{{ "%.2f"|format(s.total_fees_paid or 0) }}</td>
+                                    <td style="font-family:var(--font-mono);color:var(--color-danger);font-weight:700;">₹{{ "%.2f"|format(s.pending_fees or 0) }}</td>
+                                    <td><span class="badge {% if s.fee_status == 'PAID' %}badge-success{% elif s.fee_status == 'PARTIALLY PAID' %}badge-warning{% else %}badge-danger{% endif %}">{{ s.fee_status }}</span></td>
+                                    <td>{{ s.last_payment_date or '--' }}</td>
+                                    <td>
+                                        <button class="btn btn-small btn-secondary" onclick="viewPaymentHistory('{{ s.student_id }}', '{{ s.name | replace("'", "\\'") }}')">History 📄</button>
+                                        <button class="btn btn-small btn-primary" onclick="openStudentPay('{{ s.student_id }}')">+ Pay</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr><td colspan="8" class="text-center">No students registered yet.</td></tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
@@ -817,6 +882,7 @@
         <p>AI-Powered Hostel Food Management System &bull; Advanced Canteen Biometrics & Accounts</p>
     </footer>
 
-    <script src="/static/js/admin.js?v=2.3"></script>
+    <script id="initialStudentsData" type="application/json">{{ (initial_students or []) | tojson }}</script>
+    <script src="/static/js/admin.js?v=3.0"></script>
 </body>
 </html>

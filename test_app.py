@@ -1492,6 +1492,12 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
                 st_ids = [s['student_id'] for s in st_data['students']]
                 self.assertIn('KILLTEST999', st_ids)
 
+            with opener2.open(f"{base_url}/admin", timeout=5.0) as resp:
+                self.assertEqual(resp.status, 200)
+                admin_html = resp.read().decode('utf-8')
+                self.assertIn('KILLTEST999', admin_html)
+                self.assertIn('Abrupt Kill Survivor', admin_html)
+
             force_kill_pid(proc2.pid)
             proc2.wait(timeout=5.0)
             proc2 = None
@@ -1504,6 +1510,128 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
                         p.wait(timeout=3.0)
                     except Exception:
                         pass
+            for ext in ('', '-wal', '-shm', '-journal'):
+                candidate = temp_db_path + ext
+                if os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except Exception:
+                        pass
+
+    def test_45_admin_portal_displays_existing_and_newly_registered_students(self):
+        """
+        Verify that both existing students and newly registered students are directly
+        rendered in GET /admin HTML (#studentsTableBody, #feeAccountsTableBody,
+        #metricTotalStudents, and #initialStudentsData) as well as returned by
+        GET /api/students before and after application restart. Also verify read-only
+        that the primary instance/hostel_food.db contains the 2 genuine students.
+        """
+        import sqlite3
+        import tempfile
+        from config import DEFAULT_DB_FILE
+
+        # 1. Read-only verification of active instance/hostel_food.db
+        if os.path.exists(DEFAULT_DB_FILE):
+            ro_con = sqlite3.connect(f"file:{DEFAULT_DB_FILE}?mode=ro", uri=True)
+            cur = ro_con.cursor()
+            cur.execute("SELECT student_id, name, active FROM students ORDER BY student_id")
+            prod_rows = cur.fetchall()
+            ro_con.close()
+            prod_ids = {r[0] for r in prod_rows}
+            self.assertIn('25SUUBEAML729', prod_ids)
+            self.assertIn('25SUUBEAML761', prod_ids)
+
+        # 2. Isolated lifecycle test for /admin HTML and /api/students
+        temp_db = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        temp_db_path = os.path.abspath(temp_db.name)
+        temp_db.close()
+        uri = f"sqlite:///{temp_db_path.replace(os.sep, '/')}"
+
+        cfg = {
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': uri,
+            'SECRET_KEY': 'test-admin-portal-render',
+            'DEFAULT_ADMIN_USERNAME': 'admin',
+            'DEFAULT_ADMIN_PASSWORD': 'Admin@123',
+            'SMS_PROVIDER': 'mock'
+        }
+
+        try:
+            app1 = create_app(cfg)
+            with app1.app_context():
+                db.create_all()
+                admin = AdminUser(username='admin', email='admin@canteen.edu', role='admin')
+                admin.set_password('Admin@123')
+                existing_student = Student(
+                    student_id='EXIST001',
+                    name='Existing Resident One',
+                    srn='EXIST001',
+                    phone_number='9876543210',
+                    branch='AIML',
+                    year='2nd Year',
+                    hostel='Main Hostel',
+                    room_number='B201',
+                    total_hostel_fees=150000.0,
+                    total_fees_paid=75000.0,
+                    active=True,
+                    meal_access_enabled=True
+                )
+                db.session.add_all([admin, existing_student])
+                db.session.commit()
+
+            with app1.test_client() as client1:
+                client1.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+
+                # Verify existing student is rendered in /admin HTML immediately
+                admin_res1 = client1.get('/admin')
+                self.assertEqual(admin_res1.status_code, 200)
+                html1 = admin_res1.data.decode('utf-8')
+                self.assertIn('EXIST001', html1)
+                self.assertIn('Existing Resident One', html1)
+                self.assertIn('id="metricTotalStudents">1</h3>', html1)
+
+                # Register a second student via API
+                reg_res = client1.post('/api/students/register', json={
+                    'student_id': 'NEWREG002',
+                    'name': 'Newly Registered Two',
+                    'srn': 'NEWREG002',
+                    'phone_number': '9123456780',
+                    'branch': 'CSE',
+                    'year': '1st Year',
+                    'hostel': 'Kaveri Hostel',
+                    'room_number': 'C102',
+                    'total_hostel_fees': 150000.0,
+                    'total_fees_paid': 150000.0
+                })
+                self.assertEqual(reg_res.status_code, 201)
+
+            with app1.app_context():
+                db.session.remove()
+                db.engine.dispose()
+
+            # Simulate application restart with a new app instance on the same DB
+            app2 = create_app(cfg)
+            with app2.test_client() as client2:
+                client2.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+
+                admin_res2 = client2.get('/admin')
+                self.assertEqual(admin_res2.status_code, 200)
+                html2 = admin_res2.data.decode('utf-8')
+                self.assertIn('EXIST001', html2)
+                self.assertIn('Existing Resident One', html2)
+                self.assertIn('NEWREG002', html2)
+                self.assertIn('Newly Registered Two', html2)
+                self.assertIn('id="metricTotalStudents">2</h3>', html2)
+
+                api_res2 = client2.get('/api/students')
+                self.assertEqual(api_res2.status_code, 200)
+                api_data2 = api_res2.get_json()
+                self.assertEqual(len(api_data2['students']), 2)
+
+            with app2.app_context():
+                db.session.remove()
+                db.engine.dispose()
+        finally:
             for ext in ('', '-wal', '-shm', '-journal'):
                 candidate = temp_db_path + ext
                 if os.path.exists(candidate):

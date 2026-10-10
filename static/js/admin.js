@@ -101,6 +101,17 @@ window.fetch = async function(resource, init = {}) {
 };
 
 let allStudentsList = [];
+try {
+    const initScript = document.getElementById('initialStudentsData');
+    if (initScript && initScript.textContent) {
+        const parsed = JSON.parse(initScript.textContent);
+        if (Array.isArray(parsed)) {
+            allStudentsList = parsed;
+        }
+    }
+} catch (e) {
+    console.warn('Could not parse initialStudentsData:', e);
+}
 let adminStream = null;
 let capturedPhotoData = null;
 
@@ -123,7 +134,11 @@ function switchAdminSection(sectionName) {
     }
 
     // Trigger tab-specific refresh safely
-    if (sectionName === 'fees' && window.loadFeeLedger) window.loadFeeLedger();
+    if (sectionName === 'students') {
+        if (window.loadStudents) window.loadStudents();
+        if (window.loadMetrics) window.loadMetrics();
+    }
+    else if (sectionName === 'fees' && window.loadFeeLedger) window.loadFeeLedger();
     else if (sectionName === 'attendance') {
         if (window.loadAttendanceLogs) window.loadAttendanceLogs();
         if (window.loadRejectedLogs) window.loadRejectedLogs();
@@ -674,60 +689,113 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     window.loadMetrics = async () => {
         try {
-            const res = await fetch('/api/entries/today');
+            const res = await fetch('/api/entries/today', { cache: 'no-store', credentials: 'same-origin' });
             const data = await res.json();
             if (data.success && data.metrics) {
-                metricTotalStudents.textContent = data.metrics.total_students;
-                metricTodayBreakfast.textContent = data.metrics.today_breakfast_count;
-                metricTodayLunch.textContent = data.metrics.today_lunch_count;
-                metricFeesCollected.textContent = `₹${data.metrics.total_fees_collected.toLocaleString('en-IN')}`;
-                metricFeesPending.textContent = `₹${data.metrics.total_fees_pending.toLocaleString('en-IN')}`;
-                metricSmsCount.textContent = data.metrics.sms_delivered_count || 0;
+                if (metricTotalStudents) metricTotalStudents.textContent = data.metrics.total_students;
+                if (metricTodayBreakfast) metricTodayBreakfast.textContent = data.metrics.today_breakfast_count;
+                if (metricTodayLunch) metricTodayLunch.textContent = data.metrics.today_lunch_count;
+                if (metricFeesCollected) metricFeesCollected.textContent = `₹${Number(data.metrics.total_fees_collected || 0).toLocaleString('en-IN')}`;
+                if (metricFeesPending) metricFeesPending.textContent = `₹${Number(data.metrics.total_fees_pending || 0).toLocaleString('en-IN')}`;
+                if (metricSmsCount) metricSmsCount.textContent = data.metrics.sms_delivered_count || 0;
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Error loading dashboard metrics:', e);
+        }
     };
 
     window.loadStudents = async () => {
+        const refBtn = document.getElementById('refreshStudentsBtn');
+        if (refBtn) {
+            refBtn.disabled = true;
+            refBtn.textContent = '⏳ Refreshing...';
+        }
         try {
-            const res = await fetch('/api/students');
-            const data = await res.json();
-            if (data.success) {
-                allStudentsList = data.students || [];
-                renderStudentsTable(allStudentsList);
+            const res = await fetch('/api/students', { cache: 'no-store', credentials: 'same-origin' });
+            if (res.status === 401 || res.status === 403) {
+                window.location.href = '/login';
+                return;
             }
-        } catch (e) {}
+            const data = await res.json();
+            if (data.success && Array.isArray(data.students)) {
+                allStudentsList = data.students;
+                if (metricTotalStudents) metricTotalStudents.textContent = allStudentsList.length;
+                applyFilters();
+            }
+            if (refBtn) {
+                refBtn.textContent = '✅ Refreshed';
+                setTimeout(() => {
+                    if (refBtn) {
+                        refBtn.disabled = false;
+                        refBtn.textContent = '🔄 Refresh';
+                    }
+                }, 900);
+            }
+        } catch (e) {
+            console.error('Error loading students from /api/students:', e);
+            if (allStudentsList && allStudentsList.length > 0) {
+                applyFilters();
+            }
+            if (refBtn) {
+                refBtn.disabled = false;
+                refBtn.textContent = '🔄 Refresh';
+            }
+        }
+    };
+
+    window.clearStudentFilters = () => {
+        const searchEl = document.getElementById('studentSearchInput');
+        const feeEl = document.getElementById('filterFeeStatus');
+        const activeEl = document.getElementById('filterActiveStatus');
+        if (searchEl) searchEl.value = '';
+        if (feeEl) feeEl.value = '';
+        if (activeEl) activeEl.value = '';
+        renderStudentsTable(allStudentsList);
     };
 
     function renderStudentsTable(students) {
         const body = document.getElementById('studentsTableBody');
+        if (!body) return;
         if (!students || students.length === 0) {
-            body.innerHTML = '<tr><td colspan="10" class="text-center">No students registered yet.</td></tr>';
+            if (allStudentsList && allStudentsList.length > 0) {
+                body.innerHTML = '<tr><td colspan="10" class="text-center">No students match the current search/filter criteria. <button type="button" class="btn btn-small btn-outline" onclick="clearStudentFilters()" style="margin-left:0.5rem;">Clear Filters</button></td></tr>';
+            } else {
+                body.innerHTML = '<tr><td colspan="10" class="text-center">No students registered yet.</td></tr>';
+            }
             return;
         }
 
-        body.innerHTML = students.map(s => `
+        body.innerHTML = students.map(s => {
+            const safeName = s.name || 'Student';
+            const initials = safeName.substring(0, 2).toUpperCase();
+            const pendingFees = Number(s.pending_fees || 0).toFixed(2);
+            const feeBadgeClass = s.fee_status === 'PAID'
+                ? 'badge-success'
+                : (s.fee_status === 'PARTIALLY PAID' ? 'badge-warning' : 'badge-danger');
+
+            return `
             <tr>
                 <td>
                     ${s.photo_preview 
-                        ? `<img src="${s.photo_preview}" class="table-avatar" alt="${s.name}">`
-                        : `<div class="avatar-wrapper" style="width:36px;height:36px;font-size:0.75rem;">${s.name.substring(0,2).toUpperCase()}</div>`
+                        ? `<img src="${s.photo_preview}" class="table-avatar" alt="${safeName}">`
+                        : `<div class="avatar-wrapper" style="width:36px;height:36px;font-size:0.75rem;">${initials}</div>`
                     }
                 </td>
                 <td>
-                    <strong style="font-family:var(--font-mono);color:var(--color-primary);">${s.student_id}</strong>
+                    <strong style="font-family:var(--font-mono);color:var(--color-primary);">${s.student_id || '--'}</strong>
                     <br><small style="color:var(--text-muted);">${s.srn || ''}</small>
                 </td>
-                <td>${s.name}<br><small style="color:var(--text-secondary);">${s.branch} • ${s.year}</small></td>
-                <td>${s.hostel} - R${s.room_number || '--'}</td>
+                <td>${safeName}<br><small style="color:var(--text-secondary);">${s.branch || 'General'} • ${s.year || ''}</small></td>
+                <td>${s.hostel || 'Hostel'} - R${s.room_number || '--'}</td>
                 <td style="font-family:var(--font-mono);font-size:0.8rem;">${s.phone_number || '--'}</td>
                 <td>
-                    <span class="badge ${s.fee_status === 'PAID' ? 'badge-success' : (s.fee_status === 'PARTIALLY PAID' ? 'badge-warning' : 'badge-danger')}">
-                        ${s.fee_status}
+                    <span class="badge ${feeBadgeClass}">
+                        ${s.fee_status || 'UNPAID'}
                     </span>
                 </td>
-                <td style="font-family:var(--font-mono);">₹${s.pending_fees.toFixed(2)}</td>
+                <td style="font-family:var(--font-mono);">₹${pendingFees}</td>
                 <td>
-                    <button class="btn btn-small ${s.meal_access_enabled ? 'badge-success' : 'badge-danger'}" onclick="toggleMealAccess('${s.student_id}', ${s.meal_access_enabled})">
+                    <button class="btn btn-small ${s.meal_access_enabled ? 'badge-success' : 'badge-danger'}" onclick="toggleMealAccess('${s.student_id}', ${Boolean(s.meal_access_enabled)})">
                         ${s.meal_access_enabled ? 'Enabled ✅' : 'Disabled ⛔'}
                     </button>
                 </td>
@@ -744,7 +812,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="btn btn-small btn-outline-danger" onclick="deleteStudent('${s.student_id}')" title="Delete">🗑️</button>
                 </td>
             </tr>
-        `).join('');
+            `;
+        }).join('');
     }
 
     // Search and filter listeners
@@ -758,7 +827,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const activeStatus = document.getElementById('filterActiveStatus')?.value || '';
 
         const filtered = allStudentsList.filter(s => {
-            const matchesQuery = !query || s.name.toLowerCase().includes(query) || s.student_id.toLowerCase().includes(query) || (s.srn && s.srn.toLowerCase().includes(query)) || (s.room_number && s.room_number.includes(query));
+            const nameStr = (s.name || '').toLowerCase();
+            const idStr = (s.student_id || '').toLowerCase();
+            const srnStr = (s.srn || '').toLowerCase();
+            const roomStr = (s.room_number || '').toLowerCase();
+            const matchesQuery = !query || nameStr.includes(query) || idStr.includes(query) || srnStr.includes(query) || roomStr.includes(query);
             const matchesFee = !feeStatus || s.fee_status === feeStatus;
             const matchesActive = !activeStatus || String(s.active) === activeStatus;
             return matchesQuery && matchesFee && matchesActive;
@@ -817,40 +890,69 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // FEE LEDGER
     // ==========================================
+    function renderFeeAccountsTable(students) {
+        const body = document.getElementById('feeAccountsTableBody');
+        if (!body) return;
+        if (!students || students.length === 0) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center">No student fee accounts found.</td></tr>';
+            return;
+        }
+        body.innerHTML = students.map(s => {
+            const safeName = (s.name || 'Student').replace(/'/g, "\\'");
+            return `
+                <tr>
+                    <td><strong style="font-family:var(--font-mono);color:var(--color-primary);">${s.student_id || '--'}</strong></td>
+                    <td>${s.name || 'Student'}</td>
+                    <td style="font-family:var(--font-mono);">₹${Number(s.total_hostel_fees || 0).toFixed(2)}</td>
+                    <td style="font-family:var(--font-mono);color:var(--color-success);">₹${Number(s.total_fees_paid || 0).toFixed(2)}</td>
+                    <td style="font-family:var(--font-mono);color:var(--color-danger);font-weight:700;">₹${Number(s.pending_fees || 0).toFixed(2)}</td>
+                    <td><span class="badge ${s.fee_status === 'PAID' ? 'badge-success' : (s.fee_status === 'PARTIALLY PAID' ? 'badge-warning' : 'badge-danger')}">${s.fee_status || 'UNPAID'}</span></td>
+                    <td>${s.last_payment_date || '--'}</td>
+                    <td>
+                        <button class="btn btn-small btn-secondary" onclick="viewPaymentHistory('${s.student_id}', '${safeName}')">History 📄</button>
+                        <button class="btn btn-small btn-primary" onclick="openStudentPay('${s.student_id}')">+ Pay</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    document.getElementById('feeSearchInput')?.addEventListener('input', () => {
+        const q = (document.getElementById('feeSearchInput')?.value || '').toLowerCase().trim();
+        const filtered = allStudentsList.filter(s =>
+            !q ||
+            (s.name || '').toLowerCase().includes(q) ||
+            (s.student_id || '').toLowerCase().includes(q) ||
+            (s.srn || '').toLowerCase().includes(q)
+        );
+        renderFeeAccountsTable(filtered);
+    });
+
     window.loadFeeLedger = async () => {
         try {
             const [sumRes, studRes] = await Promise.all([
-                fetch('/api/fees/summary'),
-                fetch('/api/students')
+                fetch('/api/fees/summary', { cache: 'no-store', credentials: 'same-origin' }),
+                fetch('/api/students', { cache: 'no-store', credentials: 'same-origin' })
             ]);
             const sumData = await sumRes.json();
             const studData = await studRes.json();
 
             if (sumData.success && sumData.counts) {
-                document.getElementById('feeCountPaid').textContent = sumData.counts.paid;
-                document.getElementById('feeCountPartial').textContent = sumData.counts.partially_paid;
-                document.getElementById('feeCountUnpaid').textContent = sumData.counts.unpaid;
+                const paidEl = document.getElementById('feeCountPaid');
+                const partEl = document.getElementById('feeCountPartial');
+                const unpEl = document.getElementById('feeCountUnpaid');
+                if (paidEl) paidEl.textContent = sumData.counts.paid;
+                if (partEl) partEl.textContent = sumData.counts.partially_paid;
+                if (unpEl) unpEl.textContent = sumData.counts.unpaid;
             }
 
-            if (studData.success) {
-                const body = document.getElementById('feeAccountsTableBody');
-                body.innerHTML = studData.students.map(s => `
-                    <tr>
-                        <td><strong style="font-family:var(--font-mono);color:var(--color-primary);">${s.student_id}</strong></td>
-                        <td>${s.name}</td>
-                        <td style="font-family:var(--font-mono);">₹${s.total_hostel_fees.toFixed(2)}</td>
-                        <td style="font-family:var(--font-mono);color:var(--color-success);">₹${s.total_fees_paid.toFixed(2)}</td>
-                        <td style="font-family:var(--font-mono);color:var(--color-danger);font-weight:700;">₹${s.pending_fees.toFixed(2)}</td>
-                        <td><span class="badge ${s.fee_status === 'PAID' ? 'badge-success' : (s.fee_status === 'PARTIALLY PAID' ? 'badge-warning' : 'badge-danger')}">${s.fee_status}</span></td>
-                        <td>${s.last_payment_date || '--'}</td>
-                        <td>
-                            <button class="btn btn-small btn-secondary" onclick="viewPaymentHistory('${s.student_id}', '${s.name}')">History 📄</button>
-                            <button class="btn btn-small btn-primary" onclick="openStudentPay('${s.student_id}')">+ Pay</button>
-                        </td>
-                    </tr>
-                `).join('');
+            if (studData.success && Array.isArray(studData.students)) {
+                allStudentsList = studData.students;
+                renderFeeAccountsTable(allStudentsList);
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Error loading fee ledger:', e);
+        }
     };
 
     window.viewPaymentHistory = async (studentId, studentName) => {
@@ -1196,11 +1298,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Initial boot
-    initAdminCamera();
+    // Initial boot: reset any accidental browser autofill in filter inputs and render initial students
+    const searchEl = document.getElementById('studentSearchInput');
+    const feeFilterEl = document.getElementById('filterFeeStatus');
+    const activeFilterEl = document.getElementById('filterActiveStatus');
+    if (searchEl) searchEl.value = '';
+    if (feeFilterEl) feeFilterEl.value = '';
+    if (activeFilterEl) activeFilterEl.value = '';
+
+    if (allStudentsList && allStudentsList.length > 0) {
+        renderStudentsTable(allStudentsList);
+        renderFeeAccountsTable(allStudentsList);
+    }
+
     loadStudents();
     loadMetrics();
     window.loadAttendanceLogs();
     window.loadRejectedLogs();
+    initAdminCamera();
 });
 
