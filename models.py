@@ -109,7 +109,9 @@ class Student(db.Model):
 
     # Student portal credentials
     password_hash = db.Column(db.String(255), nullable=True)
+    must_change_password = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -140,7 +142,14 @@ class Student(db.Model):
 
     @property
     def has_face_enrolled(self):
-        return bool(self.face_encoding and str(self.face_encoding).strip())
+        raw = str(self.face_encoding or '').strip()
+        if not raw:
+            return False
+        try:
+            parsed = json.loads(raw)
+            return isinstance(parsed, list) and len(parsed) >= 64
+        except Exception:
+            return False
 
     def to_dict(self, include_encoding=False, mask_phone=False):
         """Serialize student data for JSON response, protecting sensitive credentials."""
@@ -148,6 +157,7 @@ class Student(db.Model):
         if mask_phone and self.phone_number and len(self.phone_number) >= 4:
             phone_display = '*' * (len(self.phone_number) - 4) + self.phone_number[-4:]
 
+        last_upd = self.updated_at or self.created_at
         data = {
             'id': self.id,
             'student_id': self.student_id,
@@ -170,8 +180,11 @@ class Student(db.Model):
             'meal_access_enabled': self.meal_access_enabled,
             'meal_restriction_reason': self.meal_restriction_reason or 'None',
             'has_face_enrolled': self.has_face_enrolled,
+            'has_password_set': bool(self.password_hash),
+            'must_change_password': bool(self.must_change_password),
             'photo_preview': self.photo_preview,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': last_upd.strftime('%Y-%m-%d %H:%M:%S') if last_upd else None
         }
         if include_encoding:
             data['face_encoding'] = self.face_encoding
@@ -560,12 +573,19 @@ def migrate_database(app):
                     ("last_payment_date", "VARCHAR(15)"),
                     ("meal_access_enabled", "BOOLEAN DEFAULT 1"),
                     ("meal_restriction_reason", "VARCHAR(255) DEFAULT 'None'"),
-                    ("password_hash", "VARCHAR(255)")
+                    ("password_hash", "VARCHAR(255)"),
+                    ("must_change_password", "BOOLEAN DEFAULT 0"),
+                    ("updated_at", "DATETIME")
                 ]
 
                 for col_name, col_def in student_migrations:
                     if col_name not in existing_student_cols:
                         cur.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_def};")
+
+                # Backfill any missing srn or updated_at safely without overwriting existing data
+                cur.execute("UPDATE students SET srn = UPPER(TRIM(student_id)) WHERE srn IS NULL OR TRIM(srn) = '';")
+                cur.execute("UPDATE students SET updated_at = created_at WHERE updated_at IS NULL AND created_at IS NOT NULL;")
+                cur.execute("UPDATE students SET must_change_password = 0 WHERE must_change_password IS NULL;")
 
                 # Check food_entries columns
                 cur.execute("PRAGMA table_info(food_entries);")

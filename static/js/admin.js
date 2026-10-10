@@ -512,6 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
             token = await refreshCsrfToken();
         }
 
+        const pwEl = document.getElementById('studentPassword');
         const payload = {
             csrf_token: token,
             student_id: document.getElementById('studentId').value.trim().toUpperCase(),
@@ -527,6 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
             admission_date: document.getElementById('admissionDate').value,
             total_hostel_fees: parseFloat(document.getElementById('totalHostelFees').value || 75000),
             total_fees_paid: parseFloat(document.getElementById('initialFeesPaid').value || 0),
+            password: pwEl ? pwEl.value : 'Student@123',
             image: capturedPhotoData
         };
 
@@ -546,6 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 regStatusAlert.style.display = 'block';
                 const curToken = getCsrfToken();
                 registerForm.reset();
+                if (pwEl) pwEl.value = 'Student@123';
                 const regCsrf = document.getElementById('regCsrfToken');
                 if (regCsrf && curToken) regCsrf.value = curToken;
                 retakeFacePhoto();
@@ -706,6 +709,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.loadStudents = async () => {
         const refBtn = document.getElementById('refreshStudentsBtn');
+        const body = document.getElementById('studentsTableBody');
         if (refBtn) {
             refBtn.disabled = true;
             refBtn.textContent = '⏳ Refreshing...';
@@ -716,7 +720,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.location.href = '/login';
                 return;
             }
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.success === false) {
+                const errMsg = data.message || `Database error (${res.status}): unable to retrieve student records.`;
+                if (body) {
+                    body.innerHTML = `<tr><td colspan="10" class="text-center" style="color:var(--color-danger);padding:1.25rem;font-weight:600;">⚠️ ${errMsg}</td></tr>`;
+                }
+                if (refBtn) {
+                    refBtn.disabled = false;
+                    refBtn.textContent = '🔄 Refresh';
+                }
+                return;
+            }
             if (data.success && Array.isArray(data.students)) {
                 allStudentsList = data.students;
                 if (metricTotalStudents) metricTotalStudents.textContent = allStudentsList.length;
@@ -735,10 +750,50 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error loading students from /api/students:', e);
             if (allStudentsList && allStudentsList.length > 0) {
                 applyFilters();
+            } else if (body) {
+                body.innerHTML = '<tr><td colspan="10" class="text-center" style="color:var(--color-danger);padding:1.25rem;font-weight:600;">⚠️ Network or database error while loading student records. Please click Refresh.</td></tr>';
             }
             if (refBtn) {
                 refBtn.disabled = false;
                 refBtn.textContent = '🔄 Refresh';
+            }
+        }
+    };
+
+    window.syncStudentRegisterExcel = async () => {
+        const btn = document.getElementById('syncExcelBtn');
+        const origText = btn ? btn.textContent : '📊 Sync Excel';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ Syncing...';
+        }
+        try {
+            const res = await fetch('/api/admin/students/sync-excel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                if (btn) btn.textContent = `✅ Synced (${data.row_count})`;
+                setTimeout(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = origText;
+                    }
+                }, 1500);
+            } else {
+                alert(data.message || 'Excel synchronization failed.');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = origText;
+                }
+            }
+        } catch (e) {
+            alert('Network error during Excel synchronization.');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = origText;
             }
         }
     };
@@ -805,6 +860,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </span>
                 </td>
                 <td>
+                    <button class="btn btn-small btn-outline" onclick="openEditStudentModal('${s.student_id}')" title="Edit student profile">✏️</button>
+                    <button class="btn btn-small btn-outline" onclick="openResetPasswordModal('${s.student_id}')" title="Reset student password">🔑</button>
                     <button class="btn btn-small btn-secondary" onclick="openStudentPay('${s.student_id}')" title="Record payment">💳</button>
                     <button class="btn btn-small ${s.active ? 'btn-outline' : 'badge-danger'}" onclick="toggleActive('${s.student_id}')" title="Toggle active status">
                         ${s.active ? 'Active' : 'Inactive'}
@@ -886,6 +943,183 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('payStudentId').value = studentId;
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
+
+    // Edit Student Modal Handlers
+    window.openEditStudentModal = (studentId) => {
+        const s = allStudentsList.find(item => item.student_id === studentId || item.srn === studentId);
+        if (!s) return;
+        document.getElementById('editStudentTargetId').value = s.student_id;
+        document.getElementById('editStudentSrnDisplay').value = `${s.student_id}${s.srn && s.srn !== s.student_id ? ' / ' + s.srn : ''}`;
+        document.getElementById('editStudentName').value = s.name || '';
+        document.getElementById('editStudentPhone').value = s.phone_number || '';
+        document.getElementById('editStudentHostel').value = s.hostel || '';
+        document.getElementById('editStudentRoom').value = s.room_number || '';
+        document.getElementById('editStudentSharing').value = s.room_sharing_type || 'Double';
+        document.getElementById('editStudentOccupants').value = s.room_occupants || 2;
+        document.getElementById('editStudentBranch').value = s.branch || '';
+        document.getElementById('editStudentYear').value = s.year || '';
+        document.getElementById('editStudentTotalFees').value = s.total_hostel_fees || 75000;
+        const alertEl = document.getElementById('editStudentAlert');
+        if (alertEl) alertEl.style.display = 'none';
+        const modal = document.getElementById('editStudentModal');
+        if (modal) modal.style.display = 'flex';
+    };
+
+    window.closeEditStudentModal = () => {
+        const modal = document.getElementById('editStudentModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    document.getElementById('editStudentForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const targetId = document.getElementById('editStudentTargetId')?.value;
+        const alertEl = document.getElementById('editStudentAlert');
+        const saveBtn = document.getElementById('saveEditStudentBtn');
+        if (!targetId) return;
+        if (alertEl) alertEl.style.display = 'none';
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+        }
+        try {
+            const payload = {
+                name: document.getElementById('editStudentName').value.trim(),
+                phone_number: document.getElementById('editStudentPhone').value.trim(),
+                hostel: document.getElementById('editStudentHostel').value.trim(),
+                room_number: document.getElementById('editStudentRoom').value.trim(),
+                room_sharing_type: document.getElementById('editStudentSharing').value,
+                room_occupants: parseInt(document.getElementById('editStudentOccupants').value || 2),
+                branch: document.getElementById('editStudentBranch').value.trim(),
+                year: document.getElementById('editStudentYear').value.trim(),
+                total_hostel_fees: parseFloat(document.getElementById('editStudentTotalFees').value || 75000)
+            };
+            const res = await fetch(`/api/students/${encodeURIComponent(targetId)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                if (alertEl) {
+                    alertEl.className = 'alert-box alert-success';
+                    alertEl.textContent = `✅ ${data.message}`;
+                    alertEl.style.display = 'block';
+                }
+                await loadStudents();
+                await loadMetrics();
+                setTimeout(() => closeEditStudentModal(), 700);
+            } else if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = `❌ ${data.message || 'Failed to update student profile.'}`;
+                alertEl.style.display = 'block';
+            }
+        } catch (err) {
+            if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = '❌ Network error updating student profile.';
+                alertEl.style.display = 'block';
+            }
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Changes';
+            }
+        }
+    });
+
+    // Administrator Student Password Reset Modal Handlers
+    window.openResetPasswordModal = (studentId) => {
+        const s = allStudentsList.find(item => item.student_id === studentId || item.srn === studentId);
+        const srn = s ? (s.srn || s.student_id) : studentId;
+        const name = s ? s.name : studentId;
+        document.getElementById('resetPwTargetSrn').value = srn;
+        const label = document.getElementById('resetPwStudentLabel');
+        if (label) {
+            label.innerHTML = `Resetting portal password for <strong>${name}</strong> (SRN: <code>${srn}</code>).`;
+        }
+        document.getElementById('resetPwNewPassword').value = '';
+        document.getElementById('resetPwConfirmPassword').value = '';
+        document.getElementById('resetPwMustChange').checked = true;
+        const alertEl = document.getElementById('resetPwAlert');
+        if (alertEl) alertEl.style.display = 'none';
+        const modal = document.getElementById('resetPasswordModal');
+        if (modal) modal.style.display = 'flex';
+    };
+
+    window.closeResetPasswordModal = () => {
+        const modal = document.getElementById('resetPasswordModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    document.getElementById('resetPasswordForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const targetSrn = document.getElementById('resetPwTargetSrn')?.value.trim();
+        const newPassword = document.getElementById('resetPwNewPassword')?.value.trim();
+        const confirmPassword = document.getElementById('resetPwConfirmPassword')?.value.trim();
+        const mustChange = Boolean(document.getElementById('resetPwMustChange')?.checked);
+        const alertEl = document.getElementById('resetPwAlert');
+        const submitBtn = document.getElementById('submitResetPwBtn');
+
+        if (alertEl) alertEl.style.display = 'none';
+        if (!newPassword || newPassword.length < 6) {
+            if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = '❌ New password must be at least 6 characters long.';
+                alertEl.style.display = 'block';
+            }
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = '❌ New password and confirm password do not match.';
+                alertEl.style.display = 'block';
+            }
+            return;
+        }
+
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Resetting...';
+        }
+        try {
+            const res = await fetch(`/api/students/${encodeURIComponent(targetSrn)}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    srn: targetSrn,
+                    new_password: newPassword,
+                    confirm_password: confirmPassword,
+                    must_change_password: mustChange
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                if (alertEl) {
+                    alertEl.className = 'alert-box alert-success';
+                    alertEl.textContent = `✅ ${data.message}`;
+                    alertEl.style.display = 'block';
+                }
+                await loadStudents();
+                setTimeout(() => closeResetPasswordModal(), 900);
+            } else if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = `❌ ${data.message || 'Password reset failed.'}`;
+                alertEl.style.display = 'block';
+            }
+        } catch (err) {
+            if (alertEl) {
+                alertEl.className = 'alert-box alert-danger';
+                alertEl.textContent = '❌ Network error resetting student password.';
+                alertEl.style.display = 'block';
+            }
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🔑 Reset Password';
+            }
+        }
+    });
 
     // ==========================================
     // FEE LEDGER

@@ -1641,7 +1641,741 @@ class HostelFoodSystemFullTestSuite(unittest.TestCase):
                         pass
 
 
+class MajorProjectFixVerificationTests(unittest.TestCase):
+    """
+    Comprehensive Verification Suite (TEST A through TEST T) for:
+    - Permanent SQLite Student Database Persistence
+    - Permanent Excel Student Register Synchronization (student_register.xlsx)
+    - Student Account Registration & SRN + Password Login
+    - Administrator Password Reset for Students
+    All tests run against isolated temporary SQLite databases and temporary Excel files.
+    """
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp(prefix="hostel_major_fix_test_")
+        self.db_path = os.path.join(self.temp_dir, "test_hostel_food.db")
+        self.excel_path = os.path.join(self.temp_dir, "exports", "student_register.xlsx")
+        self.db_uri = f"sqlite:///{self.db_path.replace(os.sep, '/')}"
+        self.test_cfg = {
+            'TESTING': True,
+            'CSRF_ENABLED': False,
+            'RATE_LIMIT_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': self.db_uri,
+            'STUDENT_REGISTER_EXCEL_PATH': self.excel_path,
+            'EXPORTS_DIR': os.path.dirname(self.excel_path),
+            'SECRET_KEY': 'major-fix-test-secret',
+            'DEFAULT_ADMIN_USERNAME': 'admin',
+            'DEFAULT_ADMIN_PASSWORD': 'Admin@123',
+            'DEFAULT_STUDENT_PASSWORD': 'Student@123',
+            'SMS_PROVIDER': 'mock',
+            'ENFORCE_MEAL_HOURS': False,
+            'FEE_POLICY_ENFORCED': False,
+        }
+        self.app = create_app(self.test_cfg)
+        from models import migrate_database
+        with self.app.app_context():
+            migrate_database(self.app)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        import shutil
+        try:
+            with self.app.app_context():
+                db.session.remove()
+                db.engine.dispose()
+        except Exception:
+            pass
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _admin_login(self, client=None):
+        c = client or self.client
+        res = c.post('/api/auth/login', json={
+            'role': 'admin',
+            'username': 'admin',
+            'password': 'Admin@123'
+        })
+        self.assertEqual(res.status_code, 200)
+        return res.get_json()
+
+    def _read_excel_rows(self, path=None):
+        from openpyxl import load_workbook
+        target = path or self.excel_path
+        self.assertTrue(os.path.exists(target), f"Expected Excel file at {target}")
+        wb = load_workbook(target, read_only=False, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        header = [str(c) for c in rows[0]] if rows else []
+        data_rows = []
+        for r in rows[1:]:
+            if r and r[0] is not None:
+                data_rows.append(dict(zip(header, r)))
+        return header, data_rows
+
+    def test_A_student_registration_persistence(self):
+        """TEST A — Student Registration Persistence in SQLite, Excel register, and /api/students."""
+        from excel_sync_service import REQUIRED_EXCEL_COLUMNS
+        self._admin_login()
+        res = self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML801',
+            'srn': '25SUUBEAML801',
+            'name': 'Arjun Rao',
+            'phone_number': '9876500801',
+            'hostel': 'Kaveri Hostel',
+            'room_number': '101',
+            'room_sharing_type': 'Double',
+            'room_occupants': 2,
+            'total_hostel_fees': 80000.0,
+            'total_fees_paid': 50000.0,
+            'password': 'ArjunPass123'
+        })
+        self.assertEqual(res.status_code, 201)
+        body = res.get_json()
+        self.assertTrue(body['success'])
+        self.assertTrue(body['excel_synced'])
+
+        # 1. Verify in SQLite database
+        with self.app.app_context():
+            st = Student.query.filter_by(srn='25SUUBEAML801').first()
+            self.assertIsNotNone(st)
+            self.assertEqual(st.name, 'Arjun Rao')
+            self.assertEqual(st.pending_fees, 30000.0)
+
+        # 2. Verify in Excel register
+        header, rows = self._read_excel_rows()
+        self.assertEqual(header, REQUIRED_EXCEL_COLUMNS)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['SRN'], '25SUUBEAML801')
+        self.assertEqual(rows[0]['Student Name'], 'Arjun Rao')
+        self.assertEqual(rows[0]['Hostel Room Number'], '101')
+        self.assertEqual(float(rows[0]['Total Hostel Fees']), 80000.0)
+        self.assertEqual(float(rows[0]['Fees Paid']), 50000.0)
+        self.assertEqual(float(rows[0]['Pending Fees']), 30000.0)
+
+        # 3. Verify in /api/students
+        api_res = self.client.get('/api/students')
+        self.assertEqual(api_res.status_code, 200)
+        students = api_res.get_json()['students']
+        self.assertEqual(len(students), 1)
+        self.assertEqual(students[0]['srn'], '25SUUBEAML801')
+
+    def test_B_persistence_across_restart(self):
+        """TEST B — Persistence Across Restart: close DB session, recreate app instance, verify DB, Excel, and API."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML802',
+            'srn': '25SUUBEAML802',
+            'name': 'Bhavana Nair',
+            'phone_number': '9876500802',
+            'hostel': 'Main Hostel',
+            'room_number': '202',
+            'password': 'BhavanaPass123'
+        })
+
+        with self.app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+
+        # Recreate app instance pointing to same DB & Excel
+        app2 = create_app(self.test_cfg)
+        try:
+            with app2.app_context():
+                st = Student.query.filter_by(srn='25SUUBEAML802').first()
+                self.assertIsNotNone(st)
+                self.assertEqual(st.name, 'Bhavana Nair')
+
+            with app2.test_client() as client2:
+                self._admin_login(client2)
+                api_res = client2.get('/api/students')
+                self.assertEqual(api_res.status_code, 200)
+                srns = [s['srn'] for s in api_res.get_json()['students']]
+                self.assertIn('25SUUBEAML802', srns)
+
+            _, rows = self._read_excel_rows()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['SRN'], '25SUUBEAML802')
+        finally:
+            with app2.app_context():
+                db.session.remove()
+                db.engine.dispose()
+
+    def test_C_multiple_student_registrations_no_overwrite(self):
+        """TEST C — Multiple Student Registrations: register 3 students sequentially without overwriting earlier ones."""
+        self._admin_login()
+        for idx, (srn, name) in enumerate([
+            ('25SUUBEAML811', 'Student One'),
+            ('25SUUBEAML812', 'Student Two'),
+            ('25SUUBEAML813', 'Student Three'),
+        ], start=1):
+            r = self.client.post('/api/students/register', json={
+                'student_id': srn,
+                'srn': srn,
+                'name': name,
+                'phone_number': f'987650081{idx}',
+                'room_number': f'30{idx}',
+                'password': f'Pass{idx}#1234'
+            })
+            self.assertEqual(r.status_code, 201)
+
+        with self.app.app_context():
+            self.assertEqual(Student.query.count(), 3)
+
+        _, rows = self._read_excel_rows()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r['SRN'] for r in rows], ['25SUUBEAML811', '25SUUBEAML812', '25SUUBEAML813'])
+
+    def test_D_duplicate_srn_protection(self):
+        """TEST D — Duplicate SRN Protection: reject duplicate SRN and keep original DB record and Excel row intact."""
+        self._admin_login()
+        r1 = self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML820',
+            'srn': '25SUUBEAML820',
+            'name': 'Original Resident',
+            'phone_number': '9876500820',
+            'room_number': '401',
+            'password': 'OrigPassword123'
+        })
+        self.assertEqual(r1.status_code, 201)
+
+        # Attempt duplicate with lowercase/whitespace variations
+        r2 = self.client.post('/api/students/register', json={
+            'student_id': ' 25suubeaml820 ',
+            'srn': ' 25suubeaml820 ',
+            'name': 'Attempted Overwrite',
+            'phone_number': '9999999999',
+            'room_number': '999',
+            'password': 'OtherPassword999'
+        })
+        self.assertEqual(r2.status_code, 400)
+        self.assertFalse(r2.get_json()['success'])
+
+        with self.app.app_context():
+            st = Student.query.filter_by(srn='25SUUBEAML820').first()
+            self.assertEqual(st.name, 'Original Resident')
+            self.assertEqual(st.room_number, '401')
+
+        _, rows = self._read_excel_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['Student Name'], 'Original Resident')
+
+    def test_E_admin_logout_login_persistence(self):
+        """TEST E — Admin Logout / Login Persistence: student remains visible in /api/students and /admin."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML830',
+            'srn': '25SUUBEAML830',
+            'name': 'Persistent Resident',
+            'phone_number': '9876500830',
+            'room_number': '105'
+        })
+        self.client.get('/logout')
+        self._admin_login()
+
+        api_res = self.client.get('/api/students')
+        self.assertEqual(api_res.status_code, 200)
+        self.assertEqual(len(api_res.get_json()['students']), 1)
+
+        admin_res = self.client.get('/admin')
+        self.assertEqual(admin_res.status_code, 200)
+        self.assertIn(b'25SUUBEAML830', admin_res.data)
+        self.assertIn(b'Persistent Resident', admin_res.data)
+
+    def test_F_student_login_success(self):
+        """TEST F — Student Login Success with SRN and custom password."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML840',
+            'srn': '25SUUBEAML840',
+            'name': 'Karthikeya V',
+            'phone_number': '9876500840',
+            'room_number': '208',
+            'password': 'MySecretLogin99'
+        })
+        self.client.get('/logout')
+
+        # Log in with lowercase SRN to verify normalization
+        login_res = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': ' 25suubeaml840 ',
+            'password': 'MySecretLogin99'
+        })
+        self.assertEqual(login_res.status_code, 200)
+        login_data = login_res.get_json()
+        self.assertTrue(login_data['success'])
+        self.assertEqual(login_data['role'], 'student')
+        self.assertEqual(login_data['srn'], '25SUUBEAML840')
+
+        prof_res = self.client.get('/api/student/profile')
+        self.assertEqual(prof_res.status_code, 200)
+        self.assertEqual(prof_res.get_json()['student']['name'], 'Karthikeya V')
+
+    def test_G_student_wrong_password_rejection(self):
+        """TEST G — Student Wrong Password Rejection."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML841',
+            'srn': '25SUUBEAML841',
+            'name': 'Deepa S',
+            'phone_number': '9876500841',
+            'password': 'CorrectPassword123'
+        })
+        self.client.get('/logout')
+
+        bad_res = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML841',
+            'password': 'WrongPassword999'
+        })
+        self.assertEqual(bad_res.status_code, 401)
+        self.assertFalse(bad_res.get_json()['success'])
+
+    def test_H_student_unknown_srn_rejection(self):
+        """TEST H — Student Unknown SRN Rejection."""
+        res = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': 'NONEXISTENT_SRN_999',
+            'password': 'AnyPassword123'
+        })
+        self.assertEqual(res.status_code, 401)
+        self.assertFalse(res.get_json()['success'])
+        self.assertIn('not found', res.get_json()['message'].lower())
+
+    def test_I_inactive_student_login_rejection(self):
+        """TEST I — Inactive Student Login Rejection."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML842',
+            'srn': '25SUUBEAML842',
+            'name': 'Inactive Student',
+            'phone_number': '9876500842',
+            'password': 'ActivePass123'
+        })
+        self.client.post('/api/students/25SUUBEAML842/toggle-active')
+        self.client.get('/logout')
+
+        res = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML842',
+            'password': 'ActivePass123'
+        })
+        self.assertEqual(res.status_code, 403)
+        self.assertFalse(res.get_json()['success'])
+        self.assertIn('deactivated', res.get_json()['message'].lower())
+
+    def test_J_admin_password_reset_success(self):
+        """TEST J — Admin Password Reset Success: old password fails, new password succeeds."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML850',
+            'srn': '25SUUBEAML850',
+            'name': 'Reset Target Student',
+            'phone_number': '9876500850',
+            'password': 'OldPassword123'
+        })
+        self.client.get('/logout')
+
+        # 1. Verify login works with OldPassword123
+        r_old_ok = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML850',
+            'password': 'OldPassword123'
+        })
+        self.assertEqual(r_old_ok.status_code, 200)
+        self.client.get('/logout')
+
+        # 2. Log in as admin and reset password to NewPassword456
+        self._admin_login()
+        rst_res = self.client.post('/api/students/25SUUBEAML850/reset-password', json={
+            'new_password': 'NewPassword456',
+            'confirm_password': 'NewPassword456',
+            'must_change_password': True
+        })
+        self.assertEqual(rst_res.status_code, 200)
+        self.assertTrue(rst_res.get_json()['success'])
+        self.assertTrue(rst_res.get_json()['student']['must_change_password'])
+        self.client.get('/logout')
+
+        # 3. Verify student login fails with OldPassword123
+        r_old_fail = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML850',
+            'password': 'OldPassword123'
+        })
+        self.assertEqual(r_old_fail.status_code, 401)
+
+        # 4. Verify student login succeeds with NewPassword456
+        r_new_ok = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML850',
+            'password': 'NewPassword456'
+        })
+        self.assertEqual(r_new_ok.status_code, 200)
+        self.assertTrue(r_new_ok.get_json()['must_change_password'])
+
+    def test_K_admin_password_reset_persistence_across_restart(self):
+        """TEST K — Admin Password Reset Persistence Across Restart."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML851',
+            'srn': '25SUUBEAML851',
+            'name': 'Restart Reset Student',
+            'phone_number': '9876500851',
+            'password': 'InitialPassword111'
+        })
+        self.client.post('/api/students/25SUUBEAML851/reset-password', json={
+            'new_password': 'ResetPassword222',
+            'confirm_password': 'ResetPassword222'
+        })
+
+        with self.app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+
+        app2 = create_app(self.test_cfg)
+        try:
+            with app2.test_client() as client2:
+                r_old = client2.post('/api/auth/login', json={
+                    'role': 'student',
+                    'username': '25SUUBEAML851',
+                    'password': 'InitialPassword111'
+                })
+                self.assertEqual(r_old.status_code, 401)
+
+                r_new = client2.post('/api/auth/login', json={
+                    'role': 'student',
+                    'username': '25SUUBEAML851',
+                    'password': 'ResetPassword222'
+                })
+                self.assertEqual(r_new.status_code, 200)
+        finally:
+            with app2.app_context():
+                db.session.remove()
+                db.engine.dispose()
+
+    def test_L_unauthorized_password_reset_rejection(self):
+        """TEST L — Unauthorized Password Reset Rejection (unauthenticated and student role)."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML852',
+            'srn': '25SUUBEAML852',
+            'name': 'Protected Student',
+            'phone_number': '9876500852',
+            'password': 'SafePassword123'
+        })
+        self.client.get('/logout')
+
+        # 1. Unauthenticated attempt
+        r_unauth = self.client.post('/api/students/25SUUBEAML852/reset-password', json={
+            'new_password': 'HackedPassword999'
+        })
+        self.assertIn(r_unauth.status_code, (401, 403))
+
+        # 2. Logged in as student attempt
+        self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML852',
+            'password': 'SafePassword123'
+        })
+        r_stu = self.client.post('/api/students/25SUUBEAML852/reset-password', json={
+            'new_password': 'HackedPassword999'
+        })
+        self.assertIn(r_stu.status_code, (401, 403))
+        self.client.get('/logout')
+
+        # 3. Verify original password still works and hacked password fails
+        r_orig = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML852',
+            'password': 'SafePassword123'
+        })
+        self.assertEqual(r_orig.status_code, 200)
+
+    def test_M_password_reset_validation(self):
+        """TEST M — Password Reset Validation: empty, too-short, mismatched confirm, and non-existent SRN."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML853',
+            'srn': '25SUUBEAML853',
+            'name': 'Validation Student',
+            'phone_number': '9876500853',
+            'password': 'ValidOrigPassword1'
+        })
+
+        # Empty password
+        r_empty = self.client.post('/api/students/25SUUBEAML853/reset-password', json={'new_password': ''})
+        self.assertEqual(r_empty.status_code, 400)
+
+        # Too-short password
+        r_short = self.client.post('/api/students/25SUUBEAML853/reset-password', json={'new_password': '12345'})
+        self.assertEqual(r_short.status_code, 400)
+
+        # Mismatched confirm_password
+        r_mismatch = self.client.post('/api/students/25SUUBEAML853/reset-password', json={
+            'new_password': 'ValidNewPassword1',
+            'confirm_password': 'DifferentPassword2'
+        })
+        self.assertEqual(r_mismatch.status_code, 400)
+
+        # Non-existent SRN
+        r_notfound = self.client.post('/api/students/UNKNOWN_SRN_404/reset-password', json={
+            'new_password': 'ValidNewPassword1'
+        })
+        self.assertEqual(r_notfound.status_code, 404)
+
+        # Verify original password was untouched
+        self.client.get('/logout')
+        r_login = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML853',
+            'password': 'ValidOrigPassword1'
+        })
+        self.assertEqual(r_login.status_code, 200)
+
+    def test_N_password_reset_does_not_affect_other_students(self):
+        """TEST N — Password Reset Does Not Affect Other Students."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML861',
+            'srn': '25SUUBEAML861',
+            'name': 'Student One',
+            'phone_number': '9876500861',
+            'password': 'StudentOneOrig123'
+        })
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML862',
+            'srn': '25SUUBEAML862',
+            'name': 'Student Two',
+            'phone_number': '9876500862',
+            'password': 'StudentTwoOrig456'
+        })
+
+        # Reset password for Student 1 only
+        res = self.client.post('/api/students/25SUUBEAML861/reset-password', json={
+            'new_password': 'StudentOneNew789'
+        })
+        self.assertEqual(res.status_code, 200)
+        self.client.get('/logout')
+
+        # Verify Student 2 still logs in with StudentTwoOrig456
+        r2 = self.client.post('/api/auth/login', json={
+            'role': 'student',
+            'username': '25SUUBEAML862',
+            'password': 'StudentTwoOrig456'
+        })
+        self.assertEqual(r2.status_code, 200)
+
+    def test_O_password_security_in_db_logs_and_excel(self):
+        """TEST O — Password Security in Database, Logs, and Excel."""
+        self._admin_login()
+        secret_pw = 'UltraSecretPlaintext#987'
+        reset_pw = 'UltraResetPlaintext#654'
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML870',
+            'srn': '25SUUBEAML870',
+            'name': 'Security Audit Student',
+            'phone_number': '9876500870',
+            'password': secret_pw
+        })
+        self.client.post('/api/students/25SUUBEAML870/reset-password', json={
+            'new_password': reset_pw
+        })
+
+        # 1. Verify DB stores hash, not plaintext, and AuditLog does not contain plaintext or hash
+        with self.app.app_context():
+            st = Student.query.filter_by(srn='25SUUBEAML870').first()
+            self.assertNotEqual(st.password_hash, secret_pw)
+            self.assertNotEqual(st.password_hash, reset_pw)
+            self.assertTrue(st.check_password(reset_pw))
+            pw_hash = st.password_hash
+
+            logs = AuditLog.query.all()
+            self.assertTrue(any('Admin password reset for student 25SUUBEAML870' in (l.action or '') for l in logs))
+            for l in logs:
+                blob = f"{l.action} {l.details}"
+                self.assertNotIn(secret_pw, blob)
+                self.assertNotIn(reset_pw, blob)
+                self.assertNotIn(pw_hash, blob)
+
+        # 2. Verify API responses do not expose password_hash
+        api_res = self.client.get('/api/students')
+        api_raw = json.dumps(api_res.get_json())
+        self.assertNotIn('password_hash', api_raw)
+        self.assertNotIn(reset_pw, api_raw)
+        self.assertNotIn(pw_hash, api_raw)
+
+        # 3. Verify Excel register does not contain password or password hash
+        header, rows = self._read_excel_rows()
+        for col in header:
+            self.assertNotIn('password', col.lower())
+        excel_raw = json.dumps(rows)
+        self.assertNotIn(secret_pw, excel_raw)
+        self.assertNotIn(reset_pw, excel_raw)
+        self.assertNotIn(pw_hash, excel_raw)
+
+    def test_P_excel_update_synchronization(self):
+        """TEST P — Excel Update Synchronization on profile edit, fee payment, and status toggle without duplicates."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML880',
+            'srn': '25SUUBEAML880',
+            'name': 'Sync Student',
+            'phone_number': '9876500880',
+            'room_number': '101',
+            'room_sharing_type': 'Double',
+            'total_hostel_fees': 75000.0,
+            'total_fees_paid': 25000.0
+        })
+
+        # Update room, phone, sharing, and total fees
+        u_res = self.client.put('/api/students/25SUUBEAML880', json={
+            'phone_number': '9111122222',
+            'room_number': '505',
+            'room_sharing_type': 'Single',
+            'total_hostel_fees': 90000.0
+        })
+        self.assertEqual(u_res.status_code, 200)
+
+        # Record fee payment of 30000 -> total paid = 55000, pending = 35000
+        p_res = self.client.post('/api/fees/payment', json={
+            'student_id': '25SUUBEAML880',
+            'amount': 30000.0,
+            'payment_method': 'UPI'
+        })
+        self.assertEqual(p_res.status_code, 201)
+
+        # Toggle active status to Inactive
+        t_res = self.client.post('/api/students/25SUUBEAML880/toggle-active')
+        self.assertEqual(t_res.status_code, 200)
+
+        _, rows = self._read_excel_rows()
+        self.assertEqual(len(rows), 1, "Must not create duplicate SRN rows in Excel!")
+        row = rows[0]
+        self.assertEqual(row['SRN'], '25SUUBEAML880')
+        self.assertEqual(row['Phone Number'], '9111122222')
+        self.assertEqual(row['Hostel Room Number'], '505')
+        self.assertEqual(row['Room Sharing'], 'Single')
+        self.assertEqual(row['Account Status'], 'Inactive')
+        self.assertEqual(float(row['Total Hostel Fees']), 90000.0)
+        self.assertEqual(float(row['Fees Paid']), 55000.0)
+        self.assertEqual(float(row['Pending Fees']), 35000.0)
+
+    def test_Q_excel_recovery_and_regeneration(self):
+        """TEST Q — Excel Recovery / Regeneration when Excel file is missing or out of sync."""
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML891',
+            'srn': '25SUUBEAML891',
+            'name': 'Recovery Student One',
+            'phone_number': '9876500891'
+        })
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML892',
+            'srn': '25SUUBEAML892',
+            'name': 'Recovery Student Two',
+            'phone_number': '9876500892'
+        })
+
+        # Delete the Excel file to simulate missing file
+        if os.path.exists(self.excel_path):
+            os.remove(self.excel_path)
+        self.assertFalse(os.path.exists(self.excel_path))
+
+        # Trigger regeneration via Admin API
+        sync_res = self.client.post('/api/admin/students/sync-excel')
+        self.assertEqual(sync_res.status_code, 200)
+        self.assertTrue(sync_res.get_json()['success'])
+        self.assertTrue(os.path.exists(self.excel_path))
+
+        _, rows = self._read_excel_rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r['SRN'] for r in rows}, {'25SUUBEAML891', '25SUUBEAML892'})
+
+        # Also verify download endpoint works
+        dl_res = self.client.get('/api/admin/students/export-excel')
+        self.assertEqual(dl_res.status_code, 200)
+        dl_res.close()
+
+    def test_R_face_registration_status_persistence(self):
+        """TEST R — Face Registration Status Persistence in SQLite, /api/students, and Excel register."""
+        from unittest.mock import patch
+        self._admin_login()
+        self.client.post('/api/students/register', json={
+            'student_id': '25SUUBEAML901',
+            'srn': '25SUUBEAML901',
+            'name': 'Biometric Resident',
+            'phone_number': '9876500901'
+        })
+        _, rows_before = self._read_excel_rows()
+        self.assertEqual(rows_before[0]['Face Registration Status'], 'Not Registered')
+
+        fake_encoding = [0.1234] * 128
+        with patch.object(face_service, 'decode_base64_image', return_value=(np.zeros((100, 100, 3), dtype=np.uint8), None)), \
+             patch.object(face_service, 'extract_face_encoding', return_value=(fake_encoding, 'data:image/jpeg;base64,thumb', None)):
+            e_res = self.client.post('/api/students/25SUUBEAML901/enroll-face', json={
+                'image': 'data:image/jpeg;base64,validface'
+            })
+            self.assertEqual(e_res.status_code, 200)
+
+        api_res = self.client.get('/api/students')
+        st_dict = api_res.get_json()['students'][0]
+        self.assertTrue(st_dict['has_face_enrolled'])
+
+        _, rows_after = self._read_excel_rows()
+        self.assertEqual(rows_after[0]['Face Registration Status'], 'Registered')
+
+    def test_S_canteen_verification_compatibility(self):
+        """TEST S — Canteen Verification Compatibility after DB and Excel enhancements."""
+        from unittest.mock import patch
+        self._admin_login()
+        fake_encoding = [0.25] * 128
+        with patch.object(face_service, 'decode_base64_image', return_value=(np.zeros((100, 100, 3), dtype=np.uint8), None)), \
+             patch.object(face_service, 'extract_face_encoding', return_value=(fake_encoding, 'data:image/jpeg;base64,thumb', None)):
+            self.client.post('/api/students/register', json={
+                'student_id': '25SUUBEAML902',
+                'srn': '25SUUBEAML902',
+                'name': 'Canteen Verified Student',
+                'phone_number': '9876500902',
+                'room_number': '309',
+                'image': 'data:image/jpeg;base64,validface'
+            })
+
+        # Verify manual scan by SRN works
+        m_res = self.client.post('/api/scan-manual', json={
+            'identifier': '25SUUBEAML902',
+            'meal_type': 'Breakfast'
+        })
+        self.assertEqual(m_res.status_code, 200)
+        self.assertEqual(m_res.get_json()['status'], 'granted')
+
+        # Verify biometric face scan works for Lunch
+        with patch.object(face_service, 'decode_base64_image', return_value=(np.zeros((100, 100, 3), dtype=np.uint8), None)), \
+             patch.object(face_service, 'extract_face_with_landmarks', return_value=(fake_encoding, None, None, {'box': [0, 0, 50, 50], 'landmarks': []})):
+            f_res = self.client.post('/api/scan-face', json={
+                'image': 'data:image/jpeg;base64,validface',
+                'meal_type': 'Lunch'
+            })
+            self.assertEqual(f_res.status_code, 200)
+            self.assertEqual(f_res.get_json()['status'], 'granted')
+
+    def test_T_production_database_and_excel_register_integrity(self):
+        """TEST T — Verify genuine students 25SUUBEAML729 and 25SUUBEAML761 remain intact in instance/hostel_food.db."""
+        import sqlite3
+        from config import DEFAULT_DB_FILE
+        if os.path.exists(DEFAULT_DB_FILE):
+            ro_con = sqlite3.connect(f"file:{DEFAULT_DB_FILE}?mode=ro", uri=True)
+            cur = ro_con.cursor()
+            cur.execute("SELECT student_id, name, srn, active FROM students ORDER BY student_id")
+            rows = cur.fetchall()
+            ro_con.close()
+            ids = {r[0] for r in rows}
+            self.assertIn('25SUUBEAML729', ids)
+            self.assertIn('25SUUBEAML761', ids)
+
+
 if __name__ == '__main__':
     unittest.main()
+
 
 

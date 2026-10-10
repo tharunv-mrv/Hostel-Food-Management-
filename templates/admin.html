@@ -185,7 +185,7 @@
                             </div>
                         </div>
 
-                        <div class="form-row">
+                        <div class="form-row three-cols">
                             <div class="form-group">
                                 <label for="totalHostelFees">Total Hostel Fee (₹)</label>
                                 <input type="number" id="totalHostelFees" name="total_hostel_fees" value="75000" step="500">
@@ -193,6 +193,10 @@
                             <div class="form-group">
                                 <label for="initialFeesPaid">Initial Fees Paid (₹)</label>
                                 <input type="number" id="initialFeesPaid" name="total_fees_paid" value="0" step="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="studentPassword">Initial Portal Password <span class="required">*</span></label>
+                                <input type="password" id="studentPassword" name="password" value="Student@123" minlength="6" placeholder="Min 6 chars (Default: Student@123)" required>
                             </div>
                         </div>
 
@@ -273,7 +277,7 @@
                 <div class="card-header flex-header">
                     <div>
                         <h2 class="card-title">👥 Resident Student Directory</h2>
-                        <p class="section-subtitle">Search, filter by room, fee clearance, and manage biometric profiles</p>
+                        <p class="section-subtitle">Search, filter by room, fee clearance, and manage biometric profiles &bull; Synchronized with <code>student_register.xlsx</code></p>
                     </div>
                     <div class="filters-bar">
                         <input type="text" id="studentSearchInput" placeholder="🔍 Search Name, ID, SRN..." aria-label="Search students by name, ID, or SRN" autocomplete="off">
@@ -291,6 +295,12 @@
                         <button type="button" id="refreshStudentsBtn" class="btn btn-outline btn-small" onclick="window.loadStudents && window.loadStudents()" title="Refresh student directory">
                             🔄 Refresh
                         </button>
+                        <button type="button" id="syncExcelBtn" class="btn btn-outline btn-small" onclick="window.syncStudentRegisterExcel && window.syncStudentRegisterExcel()" title="Regenerate and synchronize permanent Excel student register">
+                            📊 Sync Excel
+                        </button>
+                        <a href="/api/admin/students/export-excel" id="downloadExcelBtn" class="btn btn-secondary btn-small" title="Download permanent Excel Student Register (student_register.xlsx)" style="text-decoration:none;">
+                            📥 Excel Register
+                        </a>
                     </div>
                 </div>
 
@@ -312,7 +322,9 @@
                             </tr>
                         </thead>
                         <tbody id="studentsTableBody">
-                            {% if initial_students %}
+                            {% if db_error %}
+                                <tr><td colspan="10" class="text-center" style="color:var(--color-danger);padding:1.25rem;font-weight:600;">⚠️ {{ db_error }}</td></tr>
+                            {% elif initial_students %}
                                 {% for s in initial_students %}
                                 <tr>
                                     <td>
@@ -346,6 +358,8 @@
                                         </span>
                                     </td>
                                     <td>
+                                        <button class="btn btn-small btn-outline" onclick="openEditStudentModal('{{ s.student_id }}')" title="Edit student profile">✏️</button>
+                                        <button class="btn btn-small btn-outline" onclick="openResetPasswordModal('{{ s.student_id }}')" title="Reset student password">🔑</button>
                                         <button class="btn btn-small btn-secondary" onclick="openStudentPay('{{ s.student_id }}')" title="Record payment">💳</button>
                                         <button class="btn btn-small {% if s.active %}btn-outline{% else %}badge-danger{% endif %}" onclick="toggleActive('{{ s.student_id }}')" title="Toggle active status">
                                             {{ 'Active' if s.active else 'Inactive' }}
@@ -876,6 +890,112 @@
             </div>
         </div>
 
+        <!-- Edit Student Profile Modal -->
+        <div id="editStudentModal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="editStudentModalTitle">
+            <div class="modal-box card" style="max-width: 560px; width: 92%;">
+                <div class="card-header flex-header">
+                    <h3 class="card-title" id="editStudentModalTitle">✏️ Edit Student Profile</h3>
+                    <button class="btn btn-outline btn-small" type="button" onclick="closeEditStudentModal()" aria-label="Close edit student dialog">✕</button>
+                </div>
+                <form id="editStudentForm" style="padding-top: 0.75rem;">
+                    <input type="hidden" id="editStudentTargetId">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="editStudentSrnDisplay">Student ID / SRN</label>
+                            <input type="text" id="editStudentSrnDisplay" readonly style="opacity:0.75; cursor:not-allowed;">
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentName">Full Name <span class="required">*</span></label>
+                            <input type="text" id="editStudentName" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="editStudentPhone">Phone Number <span class="required">*</span></label>
+                            <input type="text" id="editStudentPhone" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentHostel">Hostel Name <span class="required">*</span></label>
+                            <input type="text" id="editStudentHostel" required>
+                        </div>
+                    </div>
+                    <div class="form-row three-cols">
+                        <div class="form-group">
+                            <label for="editStudentRoom">Room Number <span class="required">*</span></label>
+                            <input type="text" id="editStudentRoom" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentSharing">Room Sharing</label>
+                            <select id="editStudentSharing">
+                                <option value="Single">Single Sharing</option>
+                                <option value="Double">Double Sharing</option>
+                                <option value="Triple">Triple Sharing</option>
+                                <option value="Four-Sharing">Four Sharing</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentOccupants">Occupants</label>
+                            <input type="number" id="editStudentOccupants" min="1" max="6" value="2">
+                        </div>
+                    </div>
+                    <div class="form-row three-cols">
+                        <div class="form-group">
+                            <label for="editStudentBranch">Branch</label>
+                            <input type="text" id="editStudentBranch">
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentYear">Year</label>
+                            <input type="text" id="editStudentYear">
+                        </div>
+                        <div class="form-group">
+                            <label for="editStudentTotalFees">Total Hostel Fee (₹)</label>
+                            <input type="number" id="editStudentTotalFees" step="500">
+                        </div>
+                    </div>
+                    <div id="editStudentAlert" class="alert-box" style="display:none; margin-bottom: 1rem;"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top: 0.75rem;">
+                        <button type="button" class="btn btn-outline" onclick="closeEditStudentModal()">Cancel</button>
+                        <button type="submit" id="saveEditStudentBtn" class="btn btn-primary">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Administrator Student Password Reset Modal -->
+        <div id="resetPasswordModal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="resetPwModalTitle">
+            <div class="modal-box card" style="max-width: 480px; width: 92%;">
+                <div class="card-header flex-header">
+                    <h3 class="card-title" id="resetPwModalTitle">🔑 Reset Student Password</h3>
+                    <button class="btn btn-outline btn-small" type="button" onclick="closeResetPasswordModal()" aria-label="Close password reset dialog">✕</button>
+                </div>
+                <form id="resetPasswordForm" style="padding-top: 0.75rem;">
+                    <input type="hidden" id="resetPwTargetSrn">
+                    <p class="section-hint" id="resetPwStudentLabel" style="margin-bottom: 1rem;">
+                        Resetting portal password for selected student.
+                    </p>
+                    <div class="form-group" style="margin-bottom: 0.85rem;">
+                        <label for="resetPwNewPassword">New Password (min 6 characters) <span class="required">*</span></label>
+                        <input type="password" id="resetPwNewPassword" minlength="6" placeholder="Enter new student password" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0.85rem;">
+                        <label for="resetPwConfirmPassword">Confirm New Password <span class="required">*</span></label>
+                        <input type="password" id="resetPwConfirmPassword" minlength="6" placeholder="Confirm new student password" required>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.85rem; color:var(--text-primary);">
+                            <input type="checkbox" id="resetPwMustChange" checked style="accent-color:var(--color-primary); width:16px; height:16px;">
+                            <span>Prompt student to change password on next login</span>
+                        </label>
+                    </div>
+                    <div id="resetPwAlert" class="alert-box" style="display:none; margin-bottom: 1rem;"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+                        <button type="button" class="btn btn-outline" onclick="closeResetPasswordModal()">Cancel</button>
+                        <button type="submit" id="submitResetPwBtn" class="btn btn-primary">🔑 Reset Password</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
     </main>
 
     <footer class="app-footer">
@@ -883,6 +1003,6 @@
     </footer>
 
     <script id="initialStudentsData" type="application/json">{{ (initial_students or []) | tojson }}</script>
-    <script src="/static/js/admin.js?v=3.0"></script>
+    <script src="/static/js/admin.js?v=4.0"></script>
 </body>
 </html>

@@ -176,7 +176,7 @@
                 </table>
             </div>
 
-            <!-- Payment Receipts Table -->
+                <!-- Payment Receipts Table -->
             <div id="paymentsView" class="table-responsive" role="tabpanel" aria-labelledby="tabPayments" style="display: none;">
                 <table class="data-table">
                     <caption class="sr-only">My Hostel Fee Payment Receipts</caption>
@@ -194,6 +194,35 @@
                     </tbody>
                 </table>
             </div>
+        </section>
+
+        <!-- Account Security / Change Password Section -->
+        <section class="card" id="studentPasswordSection" style="margin-top: 1.5rem;" aria-labelledby="securityCardTitle">
+            <div class="card-header flex-header">
+                <div>
+                    <h2 class="card-title" id="securityCardTitle">🔑 Account Security & Password</h2>
+                    <p class="section-subtitle">Update your student portal login password</p>
+                </div>
+                <span class="badge badge-warning" id="mustChangePwBadge" style="display:none;">Password Reset by Admin — Change Recommended</span>
+            </div>
+            <form id="studentChangePwForm" style="margin-top: 0.75rem;">
+                <div class="form-row three-cols">
+                    <div class="form-group">
+                        <label for="stuCurrentPw">Current Password</label>
+                        <input type="password" id="stuCurrentPw" placeholder="Enter current password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="stuNewPw">New Password (min 6 chars)</label>
+                        <input type="password" id="stuNewPw" minlength="6" placeholder="Enter new password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="stuConfirmPw">Confirm New Password</label>
+                        <input type="password" id="stuConfirmPw" minlength="6" placeholder="Confirm new password" required>
+                    </div>
+                </div>
+                <div id="stuChangePwAlert" class="alert-box" style="display:none; margin-bottom: 0.85rem;"></div>
+                <button type="submit" id="stuChangePwBtn" class="btn btn-primary">Update Password</button>
+            </form>
         </section>
     </main>
 
@@ -261,6 +290,11 @@
                     document.getElementById('profileSharing').textContent = `${s.room_sharing_type} (${s.room_occupants} Occupants)`;
                     document.getElementById('profilePhone').textContent = s.phone_number || '--';
                     document.getElementById('profileBranchYear').textContent = `${s.branch} • ${s.year}`;
+
+                    const pwBadge = document.getElementById('mustChangePwBadge');
+                    if (pwBadge) {
+                        pwBadge.style.display = s.must_change_password ? 'inline-flex' : 'none';
+                    }
 
                     // Biometric badge
                     const bioBadge = document.getElementById('profileBioStatus');
@@ -360,6 +394,76 @@
                 console.error('Error loading student dashboard:', err);
             }
         }
+
+        document.getElementById('studentChangePwForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alertBox = document.getElementById('stuChangePwAlert');
+            const submitBtn = document.getElementById('stuChangePwBtn');
+            const current_password = document.getElementById('stuCurrentPw')?.value.trim();
+            const new_password = document.getElementById('stuNewPw')?.value.trim();
+            const confirm_password = document.getElementById('stuConfirmPw')?.value.trim();
+
+            if (alertBox) alertBox.style.display = 'none';
+            if (!new_password || new_password.length < 6) {
+                if (alertBox) {
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.textContent = '❌ New password must be at least 6 characters long.';
+                    alertBox.style.display = 'block';
+                }
+                return;
+            }
+            if (new_password !== confirm_password) {
+                if (alertBox) {
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.textContent = '❌ New password and confirmation do not match.';
+                    alertBox.style.display = 'block';
+                }
+                return;
+            }
+
+            const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            const csrfToken = csrfMeta ? csrfMeta.content : '';
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Updating...';
+            }
+            try {
+                const res = await fetch('/api/student/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: JSON.stringify({ current_password, new_password, confirm_password, csrf_token: csrfToken })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    if (alertBox) {
+                        alertBox.className = 'alert-box alert-success';
+                        alertBox.textContent = `✅ ${data.message}`;
+                        alertBox.style.display = 'block';
+                    }
+                    document.getElementById('studentChangePwForm')?.reset();
+                    const pwBadge = document.getElementById('mustChangePwBadge');
+                    if (pwBadge) pwBadge.style.display = 'none';
+                } else if (alertBox) {
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.textContent = `❌ ${data.message || 'Failed to update password.'}`;
+                    alertBox.style.display = 'block';
+                }
+            } catch (err) {
+                if (alertBox) {
+                    alertBox.className = 'alert-box alert-danger';
+                    alertBox.textContent = '❌ Network error while updating password.';
+                    alertBox.style.display = 'block';
+                }
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Update Password';
+                }
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', loadStudentData);
     </script>

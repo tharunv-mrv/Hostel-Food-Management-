@@ -47,10 +47,12 @@ class Config:
     """Application configuration with environment variable support."""
     SECRET_KEY = os.environ.get('SECRET_KEY', 'hostel-canteen-super-secret-key-2026')
 
-    # Primary Database & Backup Storage Paths
+    # Primary Database, Backup & Excel Register Storage Paths
     DB_FILE_PATH = DEFAULT_DB_FILE
     BACKUP_DIR = os.path.abspath(os.path.join(basedir, 'instance', 'backups'))
     BACKUP_RETENTION_COUNT = int(os.environ.get('BACKUP_RETENTION_COUNT', 10))
+    EXPORTS_DIR = os.path.abspath(os.path.join(basedir, 'instance', 'exports'))
+    STUDENT_REGISTER_EXCEL_PATH = os.path.abspath(os.path.join(basedir, 'instance', 'exports', 'student_register.xlsx'))
 
     SQLALCHEMY_DATABASE_URI = resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False

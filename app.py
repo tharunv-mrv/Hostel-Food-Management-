@@ -17,6 +17,11 @@ from models import (
 from face_service import face_service
 from sms_service import send_meal_sms_async
 from report_service import generate_daily_attendance_excel
+from excel_sync_service import (
+    sync_student_register_excel,
+    get_excel_register_status,
+    resolve_excel_register_path,
+)
 
 
 # In-memory sliding window rate-limiting store
@@ -310,37 +315,65 @@ def register_routes(app):
             log_audit(f"Logout successful for {username} ({role})", target_type="auth", target_id=username)
         return redirect(url_for('login_page'))
 
+    def _find_student_by_identifier(identifier: str):
+        """Locate a student record by normalized Student ID or SRN."""
+        ident = (identifier or '').strip().upper()
+        if not ident:
+            return None
+        return Student.query.filter(
+            (Student.student_id == ident) | (Student.srn == ident)
+        ).first()
+
     @app.route('/admin')
     @admin_required
     def admin_dashboard():
         """Admin management dashboard with server-rendered initial students and metrics."""
         get_csrf_token()
-        students = Student.query.order_by(Student.created_at.desc()).all()
-        initial_students = [s.to_dict() for s in students]
+        db_error = None
+        try:
+            students = Student.query.order_by(Student.created_at.desc()).all()
+            initial_students = [s.to_dict() for s in students]
 
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        today_entries = FoodEntry.query.filter_by(entry_date=today_str).all()
-        bf_count = sum(1 for e in today_entries if e.meal == 'Breakfast')
-        lunch_count = sum(1 for e in today_entries if e.meal == 'Lunch')
-        total_collected = round(sum(s.total_fees_paid for s in students), 2)
-        total_pending = round(sum(s.pending_fees for s in students), 2)
-        sms_count = SmsLog.query.filter(SmsLog.created_at >= datetime.now().date()).count()
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            today_entries = FoodEntry.query.filter_by(entry_date=today_str).all()
+            bf_count = sum(1 for e in today_entries if e.meal == 'Breakfast')
+            lunch_count = sum(1 for e in today_entries if e.meal == 'Lunch')
+            total_collected = round(sum(s.total_fees_paid for s in students), 2)
+            total_pending = round(sum(s.pending_fees for s in students), 2)
+            sms_count = SmsLog.query.filter(SmsLog.created_at >= datetime.now().date()).count()
 
-        initial_metrics = {
-            'total_students': len(students),
-            'today_breakfast_count': bf_count,
-            'today_lunch_count': lunch_count,
-            'total_fees_collected': total_collected,
-            'total_fees_pending': total_pending,
-            'sms_delivered_count': sms_count,
-            'paid_count': sum(1 for s in students if s.fee_status == 'PAID'),
-            'partial_count': sum(1 for s in students if s.fee_status == 'PARTIALLY PAID'),
-            'unpaid_count': sum(1 for s in students if s.fee_status == 'UNPAID')
-        }
+            initial_metrics = {
+                'total_students': len(students),
+                'today_breakfast_count': bf_count,
+                'today_lunch_count': lunch_count,
+                'total_fees_collected': total_collected,
+                'total_fees_pending': total_pending,
+                'sms_delivered_count': sms_count,
+                'paid_count': sum(1 for s in students if s.fee_status == 'PAID'),
+                'partial_count': sum(1 for s in students if s.fee_status == 'PARTIALLY PAID'),
+                'unpaid_count': sum(1 for s in students if s.fee_status == 'UNPAID')
+            }
+        except Exception as exc:
+            print(f"[Database Error] Failed to load admin dashboard data: {exc}")
+            db_error = "Database error: unable to retrieve student records."
+            initial_students = []
+            initial_metrics = {
+                'total_students': 0,
+                'today_breakfast_count': 0,
+                'today_lunch_count': 0,
+                'total_fees_collected': 0.0,
+                'total_fees_pending': 0.0,
+                'sms_delivered_count': 0,
+                'paid_count': 0,
+                'partial_count': 0,
+                'unpaid_count': 0
+            }
+
         return render_template(
             'admin.html',
             initial_students=initial_students,
-            initial_metrics=initial_metrics
+            initial_metrics=initial_metrics,
+            db_error=db_error
         )
 
     @app.route('/student')
@@ -362,8 +395,8 @@ def register_routes(app):
             return jsonify({'success': False, 'error': 'Rate Limit Exceeded', 'message': 'Too many login attempts. Please wait 1 minute.'}), 429
 
         data = request.get_json() or {}
-        role = data.get('role', 'student').lower()
-        username = (data.get('username') or '').strip()
+        role = (data.get('role') or 'student').strip().lower()
+        username = (data.get('username') or data.get('srn') or data.get('student_id') or '').strip()
         password = (data.get('password') or '').strip()
 
         if not username or not password:
@@ -382,10 +415,8 @@ def register_routes(app):
             return jsonify({'success': True, 'role': 'admin', 'redirect': '/admin', 'csrf_token': csrf_token})
 
         elif role == 'student':
-            # Allow login using either Student ID or SRN
-            student = Student.query.filter(
-                (Student.student_id == username.upper()) | (Student.srn == username.upper())
-            ).first()
+            normalized_ident = username.upper()
+            student = _find_student_by_identifier(normalized_ident)
 
             if not student:
                 return jsonify({'success': False, 'message': 'Student record not found.'}), 401
@@ -399,6 +430,7 @@ def register_routes(app):
                 if password == default_pw:
                     student.set_password(default_pw)
                     db.session.commit()
+                    flush_sqlite_to_disk()
                     valid_pw = True
 
             if not valid_pw:
@@ -409,10 +441,19 @@ def register_routes(app):
 
             session['role'] = 'student'
             session['student_id'] = student.student_id
+            session['srn'] = student.srn or student.student_id
             session['username'] = student.name
             session['user_id'] = student.id
             csrf_token = get_csrf_token()
-            return jsonify({'success': True, 'role': 'student', 'redirect': '/student', 'csrf_token': csrf_token})
+            return jsonify({
+                'success': True,
+                'role': 'student',
+                'redirect': '/student',
+                'csrf_token': csrf_token,
+                'srn': student.srn or student.student_id,
+                'student_id': student.student_id,
+                'must_change_password': bool(student.must_change_password)
+            })
 
         return jsonify({'success': False, 'message': 'Invalid role specified.'}), 400
 
@@ -426,7 +467,8 @@ def register_routes(app):
             'logged_in': True,
             'role': session.get('role'),
             'username': session.get('username'),
-            'student_id': session.get('student_id')
+            'student_id': session.get('student_id'),
+            'srn': session.get('srn') or session.get('student_id')
         })
 
     # ------------------------------------------
@@ -676,12 +718,12 @@ def register_routes(app):
     @student_required
     def student_profile():
         """Retrieve logged-in student's private profile and fee details."""
-        student_id = session.get('student_id')
-        student = Student.query.filter_by(student_id=student_id).first()
+        student_id = session.get('student_id') or session.get('srn')
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student profile not found.'}), 404
 
-        payments = FeePayment.query.filter_by(student_id=student_id).order_by(FeePayment.id.desc()).all()
+        payments = FeePayment.query.filter_by(student_id=student.student_id).order_by(FeePayment.id.desc()).all()
         return jsonify({
             'success': True,
             'student': student.to_dict(mask_phone=True),
@@ -692,11 +734,54 @@ def register_routes(app):
     @student_required
     def student_meals():
         """Retrieve logged-in student's personal meal attendance history."""
-        student_id = session.get('student_id')
-        entries = FoodEntry.query.filter_by(student_id=student_id).order_by(FoodEntry.id.desc()).all()
+        student_id = session.get('student_id') or session.get('srn')
+        student = _find_student_by_identifier(student_id)
+        target_sid = student.student_id if student else student_id
+        entries = FoodEntry.query.filter_by(student_id=target_sid).order_by(FoodEntry.id.desc()).all()
         return jsonify({
             'success': True,
             'entries': [e.to_dict() for e in entries]
+        })
+
+    @app.route('/api/student/change-password', methods=['POST'])
+    @student_required
+    def student_change_password():
+        """Allow an authenticated student to change their own password."""
+        student_id = session.get('student_id') or session.get('srn')
+        student = _find_student_by_identifier(student_id)
+        if not student:
+            return jsonify({'success': False, 'message': 'Student profile not found.'}), 404
+
+        data = request.get_json() or {}
+        current_password = (data.get('current_password') or '').strip()
+        new_password = (data.get('new_password') or '').strip()
+        confirm_password = (data.get('confirm_password') or '').strip()
+
+        if not new_password or len(new_password) < 6:
+            return jsonify({'success': False, 'message': 'New password must be at least 6 characters long.'}), 400
+
+        if confirm_password and new_password != confirm_password:
+            return jsonify({'success': False, 'message': 'New password and confirmation do not match.'}), 400
+
+        if current_password and student.password_hash and not student.check_password(current_password):
+            return jsonify({'success': False, 'message': 'Current password is incorrect.'}), 401
+
+        student.set_password(new_password)
+        student.must_change_password = False
+        student.updated_at = datetime.now()
+        db.session.commit()
+        flush_sqlite_to_disk()
+        sync_student_register_excel()
+
+        log_audit(
+            f"Student changed own password: {student.srn or student.student_id}",
+            target_type="student_auth",
+            target_id=student.srn or student.student_id
+        )
+        return jsonify({
+            'success': True,
+            'message': 'Password updated successfully.',
+            'must_change_password': False
         })
 
     @app.route('/api/student/menus', methods=['GET'])
@@ -721,66 +806,93 @@ def register_routes(app):
     @admin_required
     def get_students():
         """List and filter registered students."""
-        query = Student.query
-        room = request.args.get('room')
-        fee_status = request.args.get('fee_status')
-        active = request.args.get('active')
-        search = (request.args.get('search') or '').strip().lower()
+        try:
+            query = Student.query
+            room = request.args.get('room')
+            fee_status = request.args.get('fee_status')
+            active = request.args.get('active')
+            search = (request.args.get('search') or '').strip().lower()
 
-        if room:
-            query = query.filter_by(room_number=room)
-        if active in ('true', 'false'):
-            query = query.filter_by(active=(active == 'true'))
+            if room:
+                query = query.filter_by(room_number=room)
+            if active in ('true', 'false'):
+                query = query.filter_by(active=(active == 'true'))
 
-        students = query.order_by(Student.created_at.desc()).all()
+            students = query.order_by(Student.created_at.desc()).all()
 
-        if fee_status:
-            students = [s for s in students if s.fee_status.lower() == fee_status.lower()]
+            if fee_status:
+                students = [s for s in students if s.fee_status.lower() == fee_status.lower()]
 
-        if search:
-            students = [
-                s for s in students if
-                search in s.name.lower() or
-                search in s.student_id.lower() or
-                (s.srn and search in s.srn.lower()) or
-                (s.room_number and search in s.room_number.lower())
-            ]
+            if search:
+                students = [
+                    s for s in students if
+                    search in s.name.lower() or
+                    search in s.student_id.lower() or
+                    (s.srn and search in s.srn.lower()) or
+                    (s.room_number and search in s.room_number.lower())
+                ]
 
-        return jsonify({
-            'success': True,
-            'students': [s.to_dict() for s in students]
-        })
+            return jsonify({
+                'success': True,
+                'students': [s.to_dict() for s in students]
+            })
+        except Exception as exc:
+            print(f"[Database Error] Failed to fetch students in GET /api/students: {exc}")
+            return jsonify({
+                'success': False,
+                'error': 'Database Error',
+                'message': 'Database error: unable to retrieve student records.'
+            }), 500
 
     @app.route('/api/students/register', methods=['POST'])
     @admin_required
     def register_student():
-        """Register a new student with fees, room, and biometric face enrollment."""
+        """Register a new student with fees, room, password hash, biometric face enrollment, and Excel sync."""
         data = request.get_json() or {}
-        student_id = (data.get('student_id') or '').strip().upper()
+        raw_srn = (data.get('srn') or data.get('student_id') or '').strip().upper()
+        raw_student_id = (data.get('student_id') or raw_srn).strip().upper()
+        student_id = raw_student_id
+        srn = raw_srn or student_id
+
         name = (data.get('name') or '').strip()
-        srn = (data.get('srn') or student_id).strip().upper()
         phone_number = (data.get('phone_number') or '').strip()
         branch = (data.get('branch') or '').strip()
         year = (data.get('year') or '').strip()
         hostel = (data.get('hostel') or '').strip()
         room_number = (data.get('room_number') or '').strip()
-        room_sharing_type = data.get('room_sharing_type', 'Double')
+        room_sharing_type = (data.get('room_sharing_type') or 'Double').strip()
         room_occupants = int(data.get('room_occupants') or 2)
         admission_date = data.get('admission_date') or datetime.now().strftime('%Y-%m-%d')
-        total_hostel_fees = float(data.get('total_hostel_fees') or current_app.config.get('DEFAULT_HOSTEL_FEE', 75000.0))
+        total_hostel_fees = float(data.get('total_hostel_fees') if data.get('total_hostel_fees') is not None and data.get('total_hostel_fees') != '' else current_app.config.get('DEFAULT_HOSTEL_FEE', 75000.0))
         initial_fees_paid = float(data.get('total_fees_paid') or 0.0)
         image_data = data.get('image')
 
+        # Password handling: accept explicit initial password or fallback to default student password
+        raw_password = data.get('password') if 'password' in data else data.get('student_password')
+        if raw_password is not None and str(raw_password).strip() != '':
+            password_to_set = str(raw_password).strip()
+            if len(password_to_set) < 6:
+                return jsonify({'success': False, 'message': 'Student password must be at least 6 characters long.'}), 400
+        else:
+            password_to_set = current_app.config.get('DEFAULT_STUDENT_PASSWORD', 'Student@123')
+
         # Required fields check
         if not student_id or not name:
-            return jsonify({'success': False, 'message': 'Student ID and Full Name are mandatory.'}), 400
+            return jsonify({'success': False, 'message': 'Student ID / SRN and Full Name are mandatory.'}), 400
 
-        # Unique validation
-        if Student.query.filter_by(student_id=student_id).first():
-            return jsonify({'success': False, 'message': f'Student ID "{student_id}" is already registered.'}), 400
+        # Unique validation across both student_id and srn without overwriting existing records
+        existing_by_id = Student.query.filter(
+            (Student.student_id == student_id) | (Student.srn == student_id)
+        ).first()
+        if existing_by_id:
+            return jsonify({'success': False, 'message': f'Student ID / SRN "{student_id}" is already registered.'}), 400
 
-        if srn and Student.query.filter_by(srn=srn).first():
-            return jsonify({'success': False, 'message': f'SRN "{srn}" is already registered.'}), 400
+        if srn and srn != student_id:
+            existing_by_srn = Student.query.filter(
+                (Student.srn == srn) | (Student.student_id == srn)
+            ).first()
+            if existing_by_srn:
+                return jsonify({'success': False, 'message': f'SRN "{srn}" is already registered.'}), 400
 
         # Optional Face extraction
         encoding = None
@@ -795,6 +907,7 @@ def register_routes(app):
             encoding = enc
             thumbnail = thumb
 
+        now_dt = datetime.now()
         student = Student(
             student_id=student_id,
             name=name,
@@ -809,13 +922,16 @@ def register_routes(app):
             admission_date=admission_date,
             total_hostel_fees=total_hostel_fees,
             total_fees_paid=initial_fees_paid,
-            last_payment_date=datetime.now().strftime('%Y-%m-%d') if initial_fees_paid > 0 else None,
+            last_payment_date=now_dt.strftime('%Y-%m-%d') if initial_fees_paid > 0 else None,
             face_encoding=json.dumps(encoding) if encoding else "",
             photo_preview=thumbnail or "",
             active=True,
-            meal_access_enabled=True
+            meal_access_enabled=True,
+            must_change_password=False,
+            created_at=now_dt,
+            updated_at=now_dt
         )
-        student.set_password(current_app.config.get('DEFAULT_STUDENT_PASSWORD', 'Student@123'))
+        student.set_password(password_to_set)
         try:
             db.session.add(student)
             # Record initial payment record if amount > 0
@@ -824,7 +940,7 @@ def register_routes(app):
                     student_id=student_id,
                     student_name=name,
                     amount=initial_fees_paid,
-                    payment_date=datetime.now().strftime('%Y-%m-%d'),
+                    payment_date=now_dt.strftime('%Y-%m-%d'),
                     payment_method='Initial Registration',
                     reference_no='REG-PAY-001',
                     remarks='Initial payment at registration',
@@ -840,51 +956,196 @@ def register_routes(app):
             db.session.rollback()
             return jsonify({'success': False, 'message': f'Database error while saving student: {str(e)}'}), 500
 
+        # Synchronize permanent Excel student register (never rolls back committed DB record)
+        excel_res = sync_student_register_excel()
+
         log_audit(f"Student enrolled: {name} ({student_id})", target_type="student", target_id=student_id)
         return jsonify({
             'success': True,
             'message': f"Student {name} ({student_id}) enrolled successfully!",
-            'student': student.to_dict()
+            'student': student.to_dict(),
+            'excel_synced': excel_res.get('success', False)
         }), 201
 
     @app.route('/api/students/<student_id>', methods=['PUT'])
     @admin_required
     def update_student(student_id):
         """Update student profile details, fees, and room information."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
         data = request.get_json() or {}
-        if 'name' in data: student.name = data['name'].strip()
-        if 'phone_number' in data: student.phone_number = data['phone_number'].strip()
-        if 'room_number' in data: student.room_number = data['room_number'].strip()
-        if 'room_sharing_type' in data: student.room_sharing_type = data['room_sharing_type']
-        if 'room_occupants' in data: student.room_occupants = int(data['room_occupants'])
-        if 'total_hostel_fees' in data:
+        if 'name' in data and data['name'] is not None:
+            new_name = str(data['name']).strip()
+            if not new_name:
+                return jsonify({'success': False, 'message': 'Student name cannot be empty.'}), 400
+            student.name = new_name
+        if 'phone_number' in data and data['phone_number'] is not None:
+            student.phone_number = str(data['phone_number']).strip()
+        if 'room_number' in data and data['room_number'] is not None:
+            student.room_number = str(data['room_number']).strip()
+        if 'room_sharing_type' in data and data['room_sharing_type']:
+            student.room_sharing_type = str(data['room_sharing_type']).strip()
+        if 'room_occupants' in data and data['room_occupants'] is not None:
+            student.room_occupants = int(data['room_occupants'])
+        if 'total_hostel_fees' in data and data['total_hostel_fees'] is not None:
             old_fee = student.total_hostel_fees
             student.total_hostel_fees = float(data['total_hostel_fees'])
-            log_audit(f"Hostel fee updated for {student_id}: ₹{old_fee} -> ₹{student.total_hostel_fees}", target_type="fee", target_id=student_id)
-        if 'branch' in data: student.branch = data['branch']
-        if 'year' in data: student.year = data['year']
-        if 'hostel' in data: student.hostel = data['hostel']
+            log_audit(
+                f"Hostel fee updated for {student.student_id}: ₹{old_fee} -> ₹{student.total_hostel_fees}",
+                target_type="fee",
+                target_id=student.student_id
+            )
+        if 'branch' in data and data['branch'] is not None:
+            student.branch = str(data['branch']).strip()
+        if 'year' in data and data['year'] is not None:
+            student.year = str(data['year']).strip()
+        if 'hostel' in data and data['hostel'] is not None:
+            student.hostel = str(data['hostel']).strip()
+        if 'active' in data and isinstance(data['active'], bool):
+            student.active = data['active']
+        if 'meal_access_enabled' in data and isinstance(data['meal_access_enabled'], bool):
+            student.meal_access_enabled = data['meal_access_enabled']
 
+        student.updated_at = datetime.now()
         db.session.commit()
         flush_sqlite_to_disk()
-        return jsonify({'success': True, 'message': 'Student profile updated.', 'student': student.to_dict()})
+        excel_res = sync_student_register_excel()
+        log_audit(f"Updated profile for student {student.student_id}", target_type="student", target_id=student.student_id)
+        return jsonify({
+            'success': True,
+            'message': 'Student profile updated.',
+            'student': student.to_dict(),
+            'excel_synced': excel_res.get('success', False)
+        })
+
+    @app.route('/api/students/<identifier>/reset-password', methods=['POST'])
+    @app.route('/api/admin/students/reset-password', methods=['POST'])
+    @admin_required
+    def admin_reset_student_password(identifier=None):
+        """
+        Administrator Password Reset for a specific student by SRN or Student ID.
+        Updates only the targeted student's password_hash, sets must_change_password,
+        flushes to SQLite, syncs Excel timestamp, and records a sanitized AuditLog entry.
+        """
+        data = request.get_json() or {}
+        target_ident = (identifier or data.get('srn') or data.get('student_id') or '').strip().upper()
+        if not target_ident:
+            return jsonify({'success': False, 'message': 'Student SRN or ID is required.'}), 400
+
+        student = _find_student_by_identifier(target_ident)
+        if not student:
+            return jsonify({'success': False, 'message': f'Student "{target_ident}" not found.'}), 404
+
+        new_password = (data.get('new_password') or data.get('password') or '').strip()
+        confirm_password = data.get('confirm_password')
+
+        if not new_password or len(new_password) < 6:
+            return jsonify({
+                'success': False,
+                'message': 'New password must be at least 6 characters long.'
+            }), 400
+
+        if confirm_password is not None and new_password != str(confirm_password).strip():
+            return jsonify({
+                'success': False,
+                'message': 'New password and confirm password do not match.'
+            }), 400
+
+        must_change = bool(data.get('must_change_password', True))
+        student.set_password(new_password)
+        student.must_change_password = must_change
+        student.updated_at = datetime.now()
+
+        try:
+            db.session.commit()
+            flush_sqlite_to_disk()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'success': False, 'message': f'Database error while resetting password: {str(e)}'}), 500
+
+        sync_student_register_excel()
+
+        admin_actor = session.get('username') or 'admin'
+        target_srn = student.srn or student.student_id
+        log_audit(
+            action=f"Admin password reset for student {target_srn}",
+            target_type="student_auth",
+            target_id=target_srn,
+            details=f"Password reset by admin '{admin_actor}' for SRN {target_srn} (must_change_password={must_change})"
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f"Password reset successfully for {student.name} ({target_srn}).",
+            'student': student.to_dict()
+        }), 200
+
+    @app.route('/api/admin/students/export-excel', methods=['GET'])
+    @admin_required
+    def export_student_register_excel():
+        """Download the permanent Excel student register (`instance/exports/student_register.xlsx`)."""
+        excel_path = resolve_excel_register_path()
+        if not os.path.exists(excel_path):
+            sync_res = sync_student_register_excel()
+            if not sync_res.get('success') or not os.path.exists(excel_path):
+                return jsonify({
+                    'success': False,
+                    'message': f"Unable to generate Excel student register: {sync_res.get('error', 'unknown error')}"
+                }), 500
+
+        log_audit("Downloaded student_register.xlsx", target_type="excel_register", target_id="student_register.xlsx")
+        return send_file(
+            excel_path,
+            as_attachment=True,
+            download_name='student_register.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    @app.route('/api/admin/students/sync-excel', methods=['POST'])
+    @admin_required
+    def regenerate_student_register_excel():
+        """Regenerate and synchronize `student_register.xlsx` from the authoritative SQLite database."""
+        res = sync_student_register_excel(force_rebuild=True)
+        if res.get('success'):
+            log_audit(
+                f"Synchronized student_register.xlsx ({res.get('row_count', 0)} students)",
+                target_type="excel_register",
+                target_id="student_register.xlsx"
+            )
+            return jsonify({
+                'success': True,
+                'message': f"Excel student register synchronized ({res.get('row_count', 0)} students).",
+                **res
+            }), 200
+        return jsonify({
+            'success': False,
+            'message': f"Excel synchronization failed: {res.get('error', 'Unknown error')}",
+            **res
+        }), 500
+
+    @app.route('/api/admin/students/excel-status', methods=['GET'])
+    @admin_required
+    def student_register_excel_status():
+        """Return health and metadata for `instance/exports/student_register.xlsx`."""
+        status = get_excel_register_status()
+        return jsonify({'success': True, **status}), 200
 
     @app.route('/api/students/<student_id>/toggle-active', methods=['POST'])
     @admin_required
     def toggle_student_active(student_id):
         """Toggle active/inactive status of student."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
         student.active = not student.active
+        student.updated_at = datetime.now()
         db.session.commit()
         flush_sqlite_to_disk()
-        log_audit(f"Toggled active status for {student_id} to {student.active}", target_type="student", target_id=student_id)
+        sync_student_register_excel()
+        log_audit(f"Toggled active status for {student.student_id} to {student.active}", target_type="student", target_id=student.student_id)
         return jsonify({
             'success': True,
             'active': student.active,
@@ -895,7 +1156,7 @@ def register_routes(app):
     @admin_required
     def toggle_meal_access(student_id):
         """Enable or disable student canteen meal access with a recorded reason."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
@@ -903,10 +1164,12 @@ def register_routes(app):
         reason = data.get('reason') or ('Admin restriction' if student.meal_access_enabled else 'Restored by admin')
         student.meal_access_enabled = not student.meal_access_enabled
         student.meal_restriction_reason = reason if not student.meal_access_enabled else 'None'
+        student.updated_at = datetime.now()
 
         db.session.commit()
         flush_sqlite_to_disk()
-        log_audit(f"Toggled meal access for {student_id} to {student.meal_access_enabled}. Reason: {reason}", target_type="access", target_id=student_id)
+        sync_student_register_excel()
+        log_audit(f"Toggled meal access for {student.student_id} to {student.meal_access_enabled}. Reason: {reason}", target_type="access", target_id=student.student_id)
         return jsonify({
             'success': True,
             'meal_access_enabled': student.meal_access_enabled,
@@ -917,7 +1180,7 @@ def register_routes(app):
     @admin_required
     def enroll_face(student_id):
         """Enroll or replace student face biometrics."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
@@ -936,51 +1199,58 @@ def register_routes(app):
 
         student.face_encoding = json.dumps(encoding)
         student.photo_preview = thumbnail
+        student.updated_at = datetime.now()
         db.session.commit()
         flush_sqlite_to_disk()
+        sync_student_register_excel()
 
-        log_audit(f"Face biometrics enrolled/updated for student {student_id}", target_type="biometrics", target_id=student_id)
+        log_audit(f"Face biometrics enrolled/updated for student {student.student_id}", target_type="biometrics", target_id=student.student_id)
         return jsonify({'success': True, 'message': f"Face enrolled successfully for {student.name}."})
 
     @app.route('/api/students/<student_id>/face', methods=['DELETE'])
     @admin_required
     def remove_face(student_id):
         """Remove enrolled face reference for a student."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
         student.face_encoding = ""
         student.photo_preview = ""
+        student.updated_at = datetime.now()
         db.session.commit()
         flush_sqlite_to_disk()
+        sync_student_register_excel()
 
-        log_audit(f"Face biometrics removed for student {student_id}", target_type="biometrics", target_id=student_id)
-        return jsonify({'success': True, 'message': f"Face enrollment cleared for {student_id}."})
+        log_audit(f"Face biometrics removed for student {student.student_id}", target_type="biometrics", target_id=student.student_id)
+        return jsonify({'success': True, 'message': f"Face enrollment cleared for {student.student_id}."})
 
     @app.route('/api/students/<student_id>', methods=['DELETE'])
     @admin_required
     def delete_student(student_id):
         """Delete student record and clean up associated records within a single transaction."""
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student not found.'}), 404
 
+        target_sid = student.student_id
+        deleted_srn = student.srn or student.student_id
         try:
             # Delete associated records to prevent orphaned entries in fees, meals, and logs
-            FeePayment.query.filter_by(student_id=student_id).delete()
-            FoodEntry.query.filter_by(student_id=student_id).delete()
-            RejectedAttempt.query.filter_by(student_id=student_id).delete()
-            SmsLog.query.filter_by(student_id=student_id).delete()
+            FeePayment.query.filter_by(student_id=target_sid).delete()
+            FoodEntry.query.filter_by(student_id=target_sid).delete()
+            RejectedAttempt.query.filter_by(student_id=target_sid).delete()
+            SmsLog.query.filter_by(student_id=target_sid).delete()
 
             db.session.delete(student)
             db.session.commit()
             flush_sqlite_to_disk()
+            sync_student_register_excel(deleted_srn=deleted_srn)
             db_target = current_app.config.get('SQLALCHEMY_DATABASE_URI', current_app.config.get('DB_FILE_PATH'))
             total_students = Student.query.count()
-            print(f"[Persistence] Deleted student {student_id} from {db_target} | Total students on disk: {total_students}")
-            log_audit(f"Deleted student {student_id}", target_type="student", target_id=student_id)
-            return jsonify({'success': True, 'message': f'Student {student_id} deleted successfully.'})
+            print(f"[Persistence] Deleted student {target_sid} from {db_target} | Total students on disk: {total_students}")
+            log_audit(f"Deleted student {target_sid}", target_type="student", target_id=target_sid)
+            return jsonify({'success': True, 'message': f'Student {target_sid} deleted successfully.'})
         except Exception as e:
             db.session.rollback()
             return jsonify({'success': False, 'message': f'Failed to delete student: {str(e)}'}), 500
@@ -994,7 +1264,7 @@ def register_routes(app):
     def record_fee_payment():
         """Record an auditable fee payment and recalculate pending balance."""
         data = request.get_json() or {}
-        student_id = (data.get('student_id') or '').strip().upper()
+        student_id = (data.get('student_id') or data.get('srn') or '').strip().upper()
         amount = float(data.get('amount') or 0.0)
         payment_date = data.get('payment_date') or datetime.now().strftime('%Y-%m-%d')
         payment_method = data.get('payment_method') or 'UPI'
@@ -1004,13 +1274,13 @@ def register_routes(app):
         if not student_id or amount <= 0:
             return jsonify({'success': False, 'message': 'Valid Student ID and positive payment amount required.'}), 400
 
-        student = Student.query.filter_by(student_id=student_id).first()
+        student = _find_student_by_identifier(student_id)
         if not student:
             return jsonify({'success': False, 'message': 'Student record not found.'}), 404
 
         # Record payment transaction
         payment = FeePayment(
-            student_id=student_id,
+            student_id=student.student_id,
             student_name=student.name,
             amount=amount,
             payment_date=payment_date,
@@ -1024,10 +1294,12 @@ def register_routes(app):
         # Update student totals atomically
         student.total_fees_paid += amount
         student.last_payment_date = payment_date
+        student.updated_at = datetime.now()
         db.session.commit()
         flush_sqlite_to_disk()
+        sync_student_register_excel()
 
-        log_audit(f"Recorded fee payment of ₹{amount:.2f} for {student_id} ({payment_method})", target_type="fee", target_id=student_id)
+        log_audit(f"Recorded fee payment of ₹{amount:.2f} for {student.student_id} ({payment_method})", target_type="fee", target_id=student.student_id)
 
         return jsonify({
             'success': True,
@@ -1040,7 +1312,9 @@ def register_routes(app):
     @admin_required
     def get_fee_history(student_id):
         """Retrieve complete payment history for a student."""
-        payments = FeePayment.query.filter_by(student_id=student_id).order_by(FeePayment.id.desc()).all()
+        student = _find_student_by_identifier(student_id)
+        target_sid = student.student_id if student else student_id
+        payments = FeePayment.query.filter_by(student_id=target_sid).order_by(FeePayment.id.desc()).all()
         return jsonify({'success': True, 'payments': [p.to_dict() for p in payments]})
 
     @app.route('/api/fees/correction/<int:payment_id>', methods=['POST'])
@@ -1058,10 +1332,13 @@ def register_routes(app):
         if student:
             # Reversal
             student.total_fees_paid = max(0.0, student.total_fees_paid - payment.amount)
+            student.updated_at = datetime.now()
 
         old_amount = payment.amount
         db.session.delete(payment)
         db.session.commit()
+        flush_sqlite_to_disk()
+        sync_student_register_excel()
 
         log_audit(f"Reversed payment #{payment_id} of ₹{old_amount:.2f} for {student.student_id if student else 'Unknown'}. Reason: {reason}", target_type="fee", target_id=payment_id)
 
@@ -1689,6 +1966,7 @@ def register_routes(app):
             return jsonify({'success': False, 'message': 'Backup filename required.'}), 400
         res = restore_database_from_backup(backup_file, app=current_app)
         if res.get('success'):
+            sync_student_register_excel(app=current_app, force_rebuild=True)
             log_audit(f"Restored database from snapshot: {backup_file}", target_type="backup")
             return jsonify(res), 200
         return jsonify(res), 500
@@ -1708,6 +1986,7 @@ def create_app(test_config=None):
 
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config.get('BACKUP_DIR', os.path.join(app.instance_path, 'backups')), exist_ok=True)
+    os.makedirs(app.config.get('EXPORTS_DIR', os.path.join(app.instance_path, 'exports')), exist_ok=True)
     os.makedirs(app.config.get('REPORTS_DIR', 'reports'), exist_ok=True)
     db.init_app(app)
 
@@ -1725,6 +2004,12 @@ def create_app(test_config=None):
             print(f"[Backup] Startup note: {e}")
 
         migrate_database(app)
+        try:
+            ex_res = sync_student_register_excel(app=app)
+            if ex_res.get('success'):
+                print(f"[ExcelSync] Permanent student register verified: {ex_res['excel_path']} ({ex_res['row_count']} students)")
+        except Exception as e:
+            print(f"[ExcelSync] Startup sync note: {e}")
 
     app.config['TEMPLATES_AUTO_RELOAD'] = True
     return app
