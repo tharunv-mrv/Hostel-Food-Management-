@@ -1726,6 +1726,7 @@ def create_app(test_config=None):
 
         migrate_database(app)
 
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
     return app
 
 
@@ -1736,9 +1737,34 @@ app = create_app()
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 
+def _cleanup_stale_port_listeners(port: int):
+    """On Windows, SO_REUSEADDR allows multiple processes to bind to the same port.
+    Ensure any stale previous instance on this port is terminated before binding."""
+    if os.name != 'nt':
+        return
+    try:
+        import subprocess
+        my_pids = {str(os.getpid()), str(os.getppid())}
+        out = subprocess.check_output(['netstat', '-ano'], text=True, stderr=subprocess.DEVNULL)
+        stale_pids = set()
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0].upper() == 'TCP' and parts[3].upper() == 'LISTENING':
+                local_addr = parts[1]
+                pid = parts[4]
+                if local_addr.endswith(f':{port}') and pid not in my_pids and pid != '0':
+                    stale_pids.add(pid)
+        for pid in stale_pids:
+            subprocess.run(['taskkill', '/F', '/PID', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"[Server] Terminated stale process (PID {pid}) previously holding port {port}.")
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 'yes')
+    _cleanup_stale_port_listeners(port)
     print(f"AI-Powered Hostel Food Management System running on http://0.0.0.0:{port}")
     print(f"Admin portal available at http://0.0.0.0:{port}/admin")
     print(f"Student portal available at http://0.0.0.0:{port}/student")
