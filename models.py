@@ -542,16 +542,156 @@ class ArchivedAuditLog(db.Model):
         }
 
 
+def get_database_diagnostics(app=None) -> dict:
+    """
+    Inspect the active database backend, verify live connectivity, and return
+    sanitized diagnostic metadata without exposing passwords, secrets, or sensitive PII.
+    """
+    import os
+    from flask import current_app
+    from sqlalchemy import text
+    from sqlalchemy.engine.url import make_url
+
+    target_app = app or current_app
+    raw_uri = str(target_app.config.get('SQLALCHEMY_DATABASE_URI', '') or '')
+
+    dialect = 'unknown'
+    is_memory = False
+    sanitized_uri = 'unknown'
+    host = None
+    database_name = None
+
+    try:
+        dialect = db.engine.dialect.name
+    except Exception:
+        if raw_uri.startswith('postgresql'):
+            dialect = 'postgresql'
+        elif raw_uri.startswith('sqlite'):
+            dialect = 'sqlite'
+
+    if raw_uri.startswith('sqlite:'):
+        sanitized_uri = raw_uri
+        is_memory = ':memory:' in raw_uri
+        database_name = ':memory:' if is_memory else os.path.basename(raw_uri.replace('sqlite:///', ''))
+    elif raw_uri:
+        try:
+            parsed_url = make_url(raw_uri)
+            sanitized_uri = parsed_url.render_as_string(hide_password=True)
+            host = parsed_url.host
+            database_name = parsed_url.database
+        except Exception:
+            sanitized_uri = f"{dialect}://<redacted>"
+
+    is_render = (
+        str(os.environ.get('RENDER', '')).strip().lower() in ('true', '1', 'yes')
+        or bool(os.environ.get('RENDER_SERVICE_ID'))
+    )
+    db_url_env_set = any(
+        bool(str(os.environ.get(k, '')).strip())
+        for k in ('DATABASE_URL', 'INTERNAL_DATABASE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL')
+    )
+
+    # Storage is persistent if using PostgreSQL, or if using file-backed SQLite outside ephemeral Render containers
+    if is_memory:
+        is_persistent = False
+        storage_mode = 'ephemeral_memory'
+    elif dialect == 'postgresql':
+        is_persistent = True
+        storage_mode = 'persistent_postgresql'
+    elif dialect == 'sqlite' and is_render:
+        is_persistent = False
+        storage_mode = 'ephemeral_render_sqlite'
+    else:
+        is_persistent = True
+        storage_mode = 'persistent_local_sqlite'
+
+    connected = False
+    connection_error = None
+    student_count = 0
+    active_student_count = 0
+    face_enrolled_count = 0
+    admin_count = 0
+    food_entry_count = 0
+    fee_payment_count = 0
+
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        connected = True
+        student_count = Student.query.count()
+        active_student_count = Student.query.filter_by(active=True).count()
+        face_enrolled_count = sum(1 for s in Student.query.all() if s.has_face_enrolled)
+        admin_count = AdminUser.query.count()
+        food_entry_count = FoodEntry.query.count()
+        fee_payment_count = FeePayment.query.count()
+    except Exception as exc:
+        connected = False
+        connection_error = str(exc)
+
+    persistence_warning = None
+    if not is_persistent:
+        if storage_mode == 'ephemeral_render_sqlite':
+            persistence_warning = (
+                "EPHEMERAL STORAGE WARNING: Running on Render with local SQLite instead of PostgreSQL. "
+                "Records will disappear when the Render container spins down after 15 minutes of inactivity "
+                "or redeploys. Configure DATABASE_URL with your Render PostgreSQL Internal Database URL."
+            )
+        elif storage_mode == 'ephemeral_memory':
+            persistence_warning = "Running with an in-memory SQLite database (testing mode only)."
+
+    return {
+        'connected': connected,
+        'database_type': dialect,
+        'storage_mode': storage_mode,
+        'is_persistent_storage': is_persistent,
+        'is_memory_database': is_memory,
+        'is_render_environment': is_render,
+        'database_url_configured': db_url_env_set,
+        'sanitized_uri': sanitized_uri,
+        'host': host,
+        'database_name': database_name,
+        'counts': {
+            'students': student_count,
+            'active_students': active_student_count,
+            'face_enrolled_students': face_enrolled_count,
+            'admins': admin_count,
+            'food_entries': food_entry_count,
+            'fee_payments': fee_payment_count,
+        },
+        'persistence_warning': persistence_warning,
+        'connection_error': connection_error,
+    }
+
+
 def migrate_database(app):
     """
     Ensure all tables, missing columns, and default administrator accounts
     are created without destroying any existing data.
+    Never drops tables or resets existing student records.
+    Raises an explicit error if a configured PostgreSQL database is unreachable.
     """
+    from sqlalchemy import inspect as sa_inspect, text
+
     with app.app_context():
-        # 1. Create all missing tables
+        raw_uri = str(app.config.get('SQLALCHEMY_DATABASE_URI', '') or '')
+
+        # 0. Verify database connectivity first; never silently fall back to SQLite if PostgreSQL fails
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as conn_err:
+            print(
+                f"[CRITICAL][Database] Failed to connect to configured database ({db.engine.dialect.name}): {conn_err}"
+            )
+            raise RuntimeError(
+                f"Database connection failed for dialect '{db.engine.dialect.name}'. "
+                f"Refusing to fall back to an empty database. Details: {conn_err}"
+            ) from conn_err
+
+        # 1. Create all missing tables (safe no-op for existing tables)
         db.create_all()
 
-        # 2. Check and migrate columns on SQLite tables
+        # 2. Check and migrate columns on existing tables without dropping or resetting data
         try:
             if db.engine.dialect.name == 'sqlite':
                 conn = db.engine.raw_connection()
@@ -605,7 +745,6 @@ def migrate_database(app):
                 conn.commit()
                 conn.close()
             else:
-                from sqlalchemy import inspect as sa_inspect, text
                 inspector = sa_inspect(db.engine)
                 if inspector.has_table('students'):
                     existing_student_cols = {c['name'] for c in inspector.get_columns('students')}
@@ -628,62 +767,78 @@ def migrate_database(app):
                     with db.engine.begin() as conn:
                         for col_name, col_def in pg_student_migrations:
                             if col_name not in existing_student_cols:
-                                conn.execute(text(f"ALTER TABLE students ADD COLUMN {col_name} {col_def};"))
+                                conn.execute(text(f"ALTER TABLE students ADD COLUMN IF NOT EXISTS {col_name} {col_def};"))
                         conn.execute(text("UPDATE students SET srn = UPPER(TRIM(student_id)) WHERE srn IS NULL OR TRIM(srn) = '';"))
                         conn.execute(text("UPDATE students SET updated_at = created_at WHERE updated_at IS NULL AND created_at IS NOT NULL;"))
                         conn.execute(text("UPDATE students SET must_change_password = FALSE WHERE must_change_password IS NULL;"))
+
+                if inspector.has_table('food_entries'):
+                    existing_food_cols = {c['name'] for c in inspector.get_columns('food_entries')}
+                    pg_food_migrations = [
+                        ("srn", "VARCHAR(50)"),
+                        ("room_number", "VARCHAR(20)"),
+                        ("timestamp", "TIMESTAMP"),
+                        ("verification_method", "VARCHAR(20) DEFAULT 'face'")
+                    ]
+                    with db.engine.begin() as conn:
+                        for col_name, col_def in pg_food_migrations:
+                            if col_name not in existing_food_cols:
+                                conn.execute(text(f"ALTER TABLE food_entries ADD COLUMN IF NOT EXISTS {col_name} {col_def};"))
         except Exception as e:
             print(f"[Migration] Note during table column verification: {e}")
 
-        # 3. Ensure Default Administrator Account exists
-        default_admin = AdminUser.query.filter_by(username=app.config.get('DEFAULT_ADMIN_USERNAME', 'admin')).first()
-        if not default_admin:
-            admin = AdminUser(
-                username=app.config.get('DEFAULT_ADMIN_USERNAME', 'admin'),
-                email=app.config.get('DEFAULT_ADMIN_EMAIL', 'admin@canteen.edu'),
-                role='admin'
-            )
-            admin.set_password(app.config.get('DEFAULT_ADMIN_PASSWORD', 'Admin@123'))
-            db.session.add(admin)
-            db.session.commit()
-            print(f"[Migration] Initialized default administrator: {admin.username}")
+        # 3. Ensure Default Administrator Account exists (idempotent & multi-worker safe)
+        try:
+            default_admin_username = app.config.get('DEFAULT_ADMIN_USERNAME', 'admin')
+            default_admin = AdminUser.query.filter_by(username=default_admin_username).first()
+            if not default_admin:
+                admin = AdminUser(
+                    username=default_admin_username,
+                    email=app.config.get('DEFAULT_ADMIN_EMAIL', 'admin@canteen.edu'),
+                    role='admin'
+                )
+                admin.set_password(app.config.get('DEFAULT_ADMIN_PASSWORD', 'Admin@123'))
+                db.session.add(admin)
+                db.session.commit()
+                print(f"[Migration] Initialized default administrator: {admin.username}")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Migration] Default administrator check note: {e}")
 
-        # 4. Ensure Default Daily Menus exist
-        if MealMenu.query.count() == 0:
-            m1 = MealMenu(
-                meal_type='Breakfast',
-                menu_date='Daily',
-                items='Idli, Vada, Sambar, Coconut Chutney, Bread Butter, Tea / Coffee',
-                is_published=True
-            )
-            m2 = MealMenu(
-                meal_type='Lunch',
-                menu_date='Daily',
-                items='Steamed Rice, Dal Tadka, Paneer Butter Masala, Chapati, Mixed Veg Curry, Curd, Pickle',
-                is_published=True
-            )
-            db.session.add_all([m1, m2])
-            db.session.commit()
-            print("[Migration] Initialized default canteen meal menus.")
+        # 4. Ensure Default Daily Menus exist (idempotent & multi-worker safe)
+        try:
+            if MealMenu.query.count() == 0:
+                m1 = MealMenu(
+                    meal_type='Breakfast',
+                    menu_date='Daily',
+                    items='Idli, Vada, Sambar, Coconut Chutney, Bread Butter, Tea / Coffee',
+                    is_published=True
+                )
+                m2 = MealMenu(
+                    meal_type='Lunch',
+                    menu_date='Daily',
+                    items='Steamed Rice, Dal Tadka, Paneer Butter Masala, Chapati, Mixed Veg Curry, Curd, Pickle',
+                    is_published=True
+                )
+                db.session.add_all([m1, m2])
+                db.session.commit()
+                print("[Migration] Initialized default canteen meal menus.")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Migration] Default meal menu check note: {e}")
 
         # 5. Persistence Integrity Verification & Diagnostics
         try:
-            from sqlalchemy.engine.url import make_url
-            student_count = Student.query.count()
-            admin_count = AdminUser.query.count()
-            food_count = FoodEntry.query.count()
-            fee_count = FeePayment.query.count()
-            raw_uri = app.config.get('SQLALCHEMY_DATABASE_URI', 'Unknown')
-            if raw_uri.startswith('sqlite:'):
-                safe_uri = raw_uri
-            else:
-                try:
-                    safe_uri = make_url(raw_uri).render_as_string(hide_password=True)
-                except Exception:
-                    safe_uri = 'configured-remote-db'
-            print(f"[Persistence] Database verified: {safe_uri}")
-            print(f"[Persistence] Loaded: {student_count} students, {admin_count} admins, {food_count} food entries, {fee_count} fee payments.")
+            diag = get_database_diagnostics(app)
+            counts = diag.get('counts', {})
+            print(f"[Persistence] Database verified: {diag.get('sanitized_uri')} (type={diag.get('database_type')}, mode={diag.get('storage_mode')})")
+            print(
+                f"[Persistence] Loaded: {counts.get('students', 0)} students, "
+                f"{counts.get('admins', 0)} admins, "
+                f"{counts.get('food_entries', 0)} food entries, "
+                f"{counts.get('fee_payments', 0)} fee payments."
+            )
+            if diag.get('persistence_warning'):
+                print(f"[CRITICAL][Persistence] {diag['persistence_warning']}")
         except Exception as e:
             print(f"[Persistence] Diagnostic note: {e}")
-
-

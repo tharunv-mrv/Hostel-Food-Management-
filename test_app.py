@@ -2374,8 +2374,237 @@ class MajorProjectFixVerificationTests(unittest.TestCase):
             self.assertIn('25SUUBEAML761', ids)
 
 
+class RenderCloudPersistenceVerificationTests(unittest.TestCase):
+    """
+    Automated verification tests for Render / Cloud PostgreSQL persistence,
+    connection pool pre-ping, fail-fast on misconfigured DATABASE_URL,
+    sanitized database diagnostic endpoints, and container restart resilience.
+    """
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp(prefix="hostel_render_cloud_test_")
+        self.db_path = os.path.join(self.temp_dir, "persistent_cloud_sim.db")
+        self.excel_path = os.path.join(self.temp_dir, "exports", "student_register.xlsx")
+        self.reports_dir = os.path.join(self.temp_dir, "reports")
+        self.db_uri = f"sqlite:///{self.db_path.replace(os.sep, '/')}"
+        self.test_cfg = {
+            'TESTING': True,
+            'CSRF_ENABLED': False,
+            'RATE_LIMIT_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': self.db_uri,
+            'STUDENT_REGISTER_EXCEL_PATH': self.excel_path,
+            'EXPORTS_DIR': os.path.dirname(self.excel_path),
+            'REPORTS_DIR': self.reports_dir,
+            'SECRET_KEY': 'render-cloud-test-secret',
+            'DEFAULT_ADMIN_USERNAME': 'admin',
+            'DEFAULT_ADMIN_PASSWORD': 'Admin@123',
+            'DEFAULT_STUDENT_PASSWORD': 'Student@123',
+            'SMS_PROVIDER': 'mock',
+            'ENFORCE_MEAL_HOURS': False,
+            'FEE_POLICY_ENFORCED': False,
+        }
+        self.app = create_app(self.test_cfg)
+        from models import migrate_database
+        with self.app.app_context():
+            migrate_database(self.app)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        import shutil
+        try:
+            with self.app.app_context():
+                db.session.remove()
+                db.engine.dispose()
+        except Exception:
+            pass
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_render_01_database_url_normalization_and_engine_options(self):
+        """Verify postgres:// -> postgresql:// normalization and cloud connection pool pre-ping options."""
+        from config import resolve_database_uri, get_engine_options
+
+        pg_uri = resolve_database_uri({'DATABASE_URL': 'postgres://u1:secretpass@dpg-xyz-a.oregon-postgres.render.com:5432/hostel_db'})
+        self.assertEqual(pg_uri, 'postgresql://u1:secretpass@dpg-xyz-a.oregon-postgres.render.com:5432/hostel_db')
+
+        pg_uri2 = resolve_database_uri({'INTERNAL_DATABASE_URL': 'postgresql://u2:pass2@dpg-internal:5432/hostel_db'})
+        self.assertEqual(pg_uri2, 'postgresql://u2:pass2@dpg-internal:5432/hostel_db')
+
+        opts = get_engine_options(pg_uri)
+        self.assertTrue(opts.get('pool_pre_ping'))
+        self.assertEqual(opts.get('pool_recycle'), 280)
+        self.assertIn('connect_timeout', opts.get('connect_args', {}))
+
+    def test_render_02_no_silent_fallback_on_invalid_or_missing_postgresql(self):
+        """Verify misconfigured DATABASE_URL or missing PostgreSQL when REQUIRE_POSTGRESQL=true raises explicit errors instead of falling back to SQLite."""
+        from config import resolve_database_uri
+
+        # Empty DATABASE_URL must fail fast
+        with self.assertRaises(ValueError):
+            resolve_database_uri({'DATABASE_URL': '   '})
+
+        # Unsupported/malformed scheme must fail fast
+        with self.assertRaises(ValueError):
+            resolve_database_uri({'DATABASE_URL': 'invalid_scheme://localhost/db'})
+
+        # REQUIRE_POSTGRESQL=true without DATABASE_URL must fail fast
+        with self.assertRaises(RuntimeError):
+            resolve_database_uri({'REQUIRE_POSTGRESQL': 'true'})
+
+        # REQUIRE_POSTGRESQL=true with SQLite URI must fail fast
+        with self.assertRaises(RuntimeError):
+            resolve_database_uri({'DATABASE_URL': 'sqlite:///instance/hostel_food.db', 'REQUIRE_POSTGRESQL': 'true'})
+
+    def test_render_03_db_status_and_diagnostics_sanitization(self):
+        """Verify diagnostic endpoints identify active DB type and connectivity without exposing passwords or sensitive PII."""
+        from unittest.mock import patch
+        from models import get_database_diagnostics
+
+        # 1. Public /api/system/db-status endpoint
+        res = self.client.get('/api/system/db-status')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data['success'])
+        self.assertTrue(data['connected'])
+        self.assertEqual(data['database_type'], 'sqlite')
+        self.assertIn('counts', data)
+        # Ensure no sensitive keys are leaked
+        raw_json = res.data.decode('utf-8')
+        self.assertNotIn('Admin@123', raw_json)
+        self.assertNotIn('password_hash', raw_json)
+
+        # 2. Verify /health includes database_connected and storage_mode
+        h_res = self.client.get('/health')
+        self.assertEqual(h_res.status_code, 200)
+        h_data = h_res.get_json()
+        self.assertTrue(h_data['database_connected'])
+        self.assertEqual(h_data['database'], 'sqlite')
+
+        # 3. Verify ephemeral Render SQLite warning detection
+        with patch.dict(os.environ, {'RENDER': 'true'}, clear=False):
+            os.environ.pop('DATABASE_URL', None)
+            with self.app.app_context():
+                diag = get_database_diagnostics(self.app)
+                self.assertFalse(diag['is_persistent_storage'])
+                self.assertEqual(diag['storage_mode'], 'ephemeral_render_sqlite')
+                self.assertIn('EPHEMERAL STORAGE WARNING', diag['persistence_warning'])
+
+    def test_render_04_connection_close_reopen_and_container_restart_persistence(self):
+        """
+        Simulate registering a student on laptop, closing laptop (container spins down,
+        connections close, ephemeral local exports/reports are wiped), and reopening from phone
+        connected to the same persistent database.
+        """
+        import shutil
+        from unittest.mock import patch
+
+        # Login as admin and register student with face biometric data
+        self.client.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+        fake_encoding = [0.42] * 128
+        with patch.object(face_service, 'decode_base64_image', return_value=(np.zeros((100, 100, 3), dtype=np.uint8), None)), \
+             patch.object(face_service, 'extract_face_encoding', return_value=(fake_encoding, 'data:image/jpeg;base64,cloudthumb', None)):
+            reg_res = self.client.post('/api/students/register', json={
+                'student_id': '25CLOUD999',
+                'srn': '25CLOUD999',
+                'name': 'Mobile Persistent Student',
+                'phone_number': '9876599999',
+                'branch': 'CSE',
+                'year': '2nd Year',
+                'hostel': 'Cauvery Hostel',
+                'room_number': '404',
+                'total_hostel_fees': 75000.0,
+                'total_fees_paid': 60000.0,
+                'password': 'CloudPass@999',
+                'image': 'data:image/jpeg;base64,validface'
+            })
+            self.assertEqual(reg_res.status_code, 201)
+
+        # Record a meal entry
+        scan_res = self.client.post('/api/scan-manual', json={
+            'identifier': '25CLOUD999',
+            'meal_type': 'Breakfast'
+        })
+        self.assertEqual(scan_res.status_code, 200)
+
+        # Simulate closing laptop & Render container spin-down:
+        # 1. Close all SQLAlchemy sessions and dispose engine pool
+        with self.app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+
+        # 2. Wipe local container export/report directories (ephemeral disk wipe on Render)
+        shutil.rmtree(os.path.dirname(self.excel_path), ignore_errors=True)
+        shutil.rmtree(self.reports_dir, ignore_errors=True)
+        self.assertFalse(os.path.exists(self.excel_path))
+
+        # 3. Boot a brand-new application instance pointing to the same persistent database
+        from models import migrate_database
+        restarted_app = create_app(self.test_cfg)
+        with restarted_app.app_context():
+            migrate_database(restarted_app)
+
+        with restarted_app.test_client() as phone_client:
+            # Verify student can log in from their phone using SRN + password
+            st_login = phone_client.post('/api/auth/login', json={
+                'role': 'student',
+                'username': '25CLOUD999',
+                'password': 'CloudPass@999'
+            })
+            self.assertEqual(st_login.status_code, 200)
+            self.assertTrue(st_login.get_json()['success'])
+
+            # Verify admin sees the student, face enrollment, fees, and meal attendance
+            phone_client.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+            st_list = phone_client.get('/api/students').get_json()['students']
+            self.assertEqual(len(st_list), 1)
+            self.assertEqual(st_list[0]['student_id'], '25CLOUD999')
+            self.assertEqual(st_list[0]['name'], 'Mobile Persistent Student')
+            self.assertTrue(st_list[0]['has_face_enrolled'])
+            self.assertEqual(st_list[0]['photo_preview'], 'data:image/jpeg;base64,cloudthumb')
+            self.assertEqual(st_list[0]['pending_fees'], 15000.0)
+
+            # Verify Excel export regenerates automatically from DB even after container disk wipe
+            excel_dl = phone_client.get('/api/admin/students/export-excel')
+            self.assertEqual(excel_dl.status_code, 200)
+            excel_dl.close()
+            self.assertTrue(os.path.exists(self.excel_path))
+
+            # Verify Daily Attendance Excel report regenerates automatically from DB
+            rep_dl = phone_client.get('/api/reports/download?format=xlsx')
+            self.assertEqual(rep_dl.status_code, 200)
+            rep_dl.close()
+
+        with restarted_app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+
+    def test_render_05_production_reset_db_protection(self):
+        """Verify destructive full student database reset is blocked when running in production/Render."""
+        from unittest.mock import patch
+
+        self.client.post('/api/auth/login', json={'role': 'admin', 'username': 'admin', 'password': 'Admin@123'})
+        self.client.post('/api/students/register', json={
+            'student_id': '25PROD001',
+            'srn': '25PROD001',
+            'name': 'Protected Production Student',
+            'phone_number': '9876511111'
+        })
+
+        with patch.dict(os.environ, {'RENDER': 'true'}, clear=False):
+            reset_res = self.client.post('/api/admin/reset-db', json={'target': 'all'})
+            self.assertEqual(reset_res.status_code, 403)
+            self.assertFalse(reset_res.get_json()['success'])
+
+        # Student must still exist intact
+        st_list = self.client.get('/api/students').get_json()['students']
+        self.assertEqual(len(st_list), 1)
+        self.assertEqual(st_list[0]['student_id'], '25PROD001')
+
+
 if __name__ == '__main__':
     unittest.main()
+
 
 
 

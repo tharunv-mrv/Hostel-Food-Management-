@@ -9,10 +9,11 @@ from flask import Flask, render_template, request, jsonify, current_app, session
 from werkzeug.security import generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from config import Config
+from config import Config, get_engine_options
 from models import (
     db, AdminUser, Student, FeePayment, MealMenu, FoodEntry, RejectedAttempt, SmsLog, DailyReport, AuditLog,
-    ArchivedFoodEntry, ArchivedRejectedAttempt, ArchivedSmsLog, ArchivedAuditLog, migrate_database, flush_sqlite_to_disk
+    ArchivedFoodEntry, ArchivedRejectedAttempt, ArchivedSmsLog, ArchivedAuditLog,
+    migrate_database, flush_sqlite_to_disk, get_database_diagnostics
 )
 from face_service import face_service
 from sms_service import send_meal_sms_async
@@ -278,13 +279,51 @@ def register_routes(app):
     def health_check():
         """Service health-check endpoint for cloud load balancers and deployment probes."""
         models_loaded = bool(face_service.detector is not None and face_service.recognizer is not None)
+        diag = get_database_diagnostics()
+        status_code = 200 if diag.get('connected') else 503
         return jsonify({
-            'status': 'healthy',
+            'status': 'healthy' if diag.get('connected') else 'degraded',
             'timestamp': datetime.now().isoformat(),
             'service': 'Hostel Food Management System',
             'models_loaded': models_loaded,
-            'database': db.engine.dialect.name
-        }), 200
+            'database': diag.get('database_type'),
+            'database_connected': diag.get('connected'),
+            'storage_mode': diag.get('storage_mode'),
+            'is_persistent_storage': diag.get('is_persistent_storage'),
+            'database_url_configured': diag.get('database_url_configured'),
+            'student_count': diag.get('counts', {}).get('students', 0),
+            'persistence_warning': diag.get('persistence_warning'),
+        }), status_code
+
+    @app.route('/api/system/db-status', methods=['GET'])
+    def system_db_status():
+        """
+        Public diagnostic endpoint that identifies the active database type and
+        confirms live connectivity without exposing passwords, secrets, or sensitive student PII.
+        """
+        diag = get_database_diagnostics()
+        status_code = 200 if diag.get('connected') else 503
+        return jsonify({
+            'success': diag.get('connected', False),
+            'database_type': diag.get('database_type'),
+            'connected': diag.get('connected'),
+            'storage_mode': diag.get('storage_mode'),
+            'is_persistent_storage': diag.get('is_persistent_storage'),
+            'is_render_environment': diag.get('is_render_environment'),
+            'database_url_configured': diag.get('database_url_configured'),
+            'counts': {
+                'students': diag.get('counts', {}).get('students', 0),
+                'active_students': diag.get('counts', {}).get('active_students', 0),
+            },
+            'persistence_warning': diag.get('persistence_warning'),
+        }), status_code
+
+    @app.route('/api/admin/db-diagnostics', methods=['GET'])
+    @admin_required
+    def admin_db_diagnostics():
+        """Administrator diagnostic endpoint returning sanitized database & persistence details."""
+        diag = get_database_diagnostics()
+        return jsonify({'success': diag.get('connected', False), **diag}), 200
 
     # ------------------------------------------
     # PAGE ROUTES
@@ -330,6 +369,7 @@ def register_routes(app):
         """Admin management dashboard with server-rendered initial students and metrics."""
         get_csrf_token()
         db_error = None
+        db_diagnostics = get_database_diagnostics()
         try:
             students = Student.query.order_by(Student.created_at.desc()).all()
             initial_students = [s.to_dict() for s in students]
@@ -373,7 +413,8 @@ def register_routes(app):
             'admin.html',
             initial_students=initial_students,
             initial_metrics=initial_metrics,
-            db_error=db_error
+            db_error=db_error,
+            db_diagnostics=db_diagnostics
         )
 
     @app.route('/student')
@@ -1085,15 +1126,14 @@ def register_routes(app):
     @app.route('/api/admin/students/export-excel', methods=['GET'])
     @admin_required
     def export_student_register_excel():
-        """Download the permanent Excel student register (`instance/exports/student_register.xlsx`)."""
+        """Download the permanent Excel student register (`instance/exports/student_register.xlsx`), freshly synchronized with the authoritative database."""
         excel_path = resolve_excel_register_path()
-        if not os.path.exists(excel_path):
-            sync_res = sync_student_register_excel()
-            if not sync_res.get('success') or not os.path.exists(excel_path):
-                return jsonify({
-                    'success': False,
-                    'message': f"Unable to generate Excel student register: {sync_res.get('error', 'unknown error')}"
-                }), 500
+        sync_res = sync_student_register_excel(force_rebuild=True)
+        if not sync_res.get('success') or not os.path.exists(excel_path):
+            return jsonify({
+                'success': False,
+                'message': f"Unable to generate Excel student register: {sync_res.get('error', 'unknown error')}"
+            }), 500
 
         log_audit("Downloaded student_register.xlsx", target_type="excel_register", target_id="student_register.xlsx")
         return send_file(
@@ -1487,7 +1527,7 @@ def register_routes(app):
     @app.route('/api/reports/download', methods=['GET'])
     @admin_required
     def download_report():
-        """Download generated Excel or CSV attendance sheet."""
+        """Download generated Excel or CSV attendance sheet, freshly synchronized from the database."""
         report_date = request.args.get('date') or datetime.now().strftime('%Y-%m-%d')
         fmt = request.args.get('format', 'xlsx').lower()
 
@@ -1495,9 +1535,8 @@ def register_routes(app):
         filename = f"attendance_{report_date}.{fmt}"
         filepath = os.path.join(reports_dir, filename)
 
-        if not os.path.exists(filepath):
-            # Generate on the fly
-            generate_daily_attendance_excel(report_date, reports_dir)
+        # Always regenerate from database to ensure latest students and meal entries are included even after cloud container restarts
+        generate_daily_attendance_excel(report_date, reports_dir)
 
         if os.path.exists(filepath):
             return send_file(filepath, as_attachment=True, download_name=filename)
@@ -1907,11 +1946,23 @@ def register_routes(app):
     @app.route('/api/admin/reset-db', methods=['POST'])
     @admin_required
     def reset_database():
-        """Development helper to clear entries or whole database."""
+        """Clear meal entries or whole database (full student reset is blocked in production unless ALLOW_PERMANENT_DELETION=true)."""
         data = request.get_json() or {}
         target = data.get('target', 'entries')
 
+        is_prod = (
+            str(os.environ.get('FLASK_ENV', '')).strip().lower() == 'production'
+            or str(os.environ.get('RENDER', '')).strip().lower() in ('true', '1', 'yes')
+            or bool(os.environ.get('RENDER_SERVICE_ID'))
+        )
+
         if target == 'all':
+            if is_prod and not current_app.config.get('ALLOW_PERMANENT_DELETION', False):
+                return jsonify({
+                    'success': False,
+                    'message': 'Destructive full database reset (deleting all student records) is disabled in production to protect permanent student data.'
+                }), 403
+
             from backup_service import create_database_backup
             create_database_backup(label="pre_reset_safety", app=current_app)
             FoodEntry.query.delete()
@@ -1924,6 +1975,9 @@ def register_routes(app):
             RejectedAttempt.query.delete()
 
         db.session.commit()
+        flush_sqlite_to_disk()
+        if target == 'all':
+            sync_student_register_excel(force_rebuild=True)
         log_audit(f"Reset database target={target}", target_type="system")
         return jsonify({
             'success': True,
@@ -1983,6 +2037,8 @@ def create_app(test_config=None):
 
     if test_config:
         app.config.update(test_config)
+        if 'SQLALCHEMY_DATABASE_URI' in test_config and 'SQLALCHEMY_ENGINE_OPTIONS' not in test_config:
+            app.config['SQLALCHEMY_ENGINE_OPTIONS'] = get_engine_options(app.config['SQLALCHEMY_DATABASE_URI'])
 
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(app.config.get('BACKUP_DIR', os.path.join(app.instance_path, 'backups')), exist_ok=True)

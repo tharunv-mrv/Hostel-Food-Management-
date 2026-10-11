@@ -1,12 +1,22 @@
+databases:
+  - name: hostel-food-db
+    databaseName: hostel_food_db
+    user: hostel_food_user
+    plan: free
+
 services:
   - type: web
     name: hostel-food-management
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 120 --preload app:app
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hostel-food-db
+          property: connectionString
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: FLASK_ENV
@@ -35,3 +45,4 @@ services:
         value: "false"
       - key: SMS_PROVIDER
         value: mock
+

@@ -4,23 +4,59 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 DEFAULT_DB_FILE = os.path.abspath(os.path.join(basedir, 'instance', 'hostel_food.db'))
 
 
-def resolve_database_uri() -> str:
+def resolve_database_uri(environ=None) -> str:
     """
     Resolve and canonicalize the database URI.
-    Ensures that SQLite databases always use strict, absolute file paths anchored
-    to the project root directory (basedir), converting relative paths and normalizing
-    Windows backslashes into RFC-compliant forward slashes. This prevents data loss
-    when VS Code or terminals are launched from different working directories.
+    1. In production (Render), uses DATABASE_URL (or INTERNAL_DATABASE_URL / POSTGRES_URL)
+       to connect to persistent Render PostgreSQL, automatically normalizing 'postgres://'
+       to 'postgresql://'.
+    2. Never silently falls back to SQLite if DATABASE_URL is malformed or if
+       REQUIRE_POSTGRESQL=true is set.
+    3. For local development, ensures SQLite uses a strict absolute path anchored to basedir.
     """
-    raw_db_url = os.environ.get('DATABASE_URL')
-    if raw_db_url:
-        raw_db_url = raw_db_url.strip()
+    env = environ if environ is not None else os.environ
+
+    raw_db_url = None
+    used_var = None
+    for var_name in ('DATABASE_URL', 'INTERNAL_DATABASE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL'):
+        if var_name in env and env.get(var_name) is not None:
+            raw_db_url = str(env.get(var_name)).strip().strip('"').strip("'")
+            used_var = var_name
+            break
+
+    require_pg = str(env.get('REQUIRE_POSTGRESQL', 'false')).strip().lower() in ('true', '1', 'yes')
+    is_render = (
+        str(env.get('RENDER', '')).strip().lower() in ('true', '1', 'yes')
+        or bool(env.get('RENDER_SERVICE_ID'))
+    )
+
+    if raw_db_url is not None:
+        if not raw_db_url:
+            msg = (
+                f"[CRITICAL][Database] Environment variable {used_var} is set to an empty string! "
+                "Refusing to silently fall back to an empty local SQLite database. "
+                "Provide a valid PostgreSQL DATABASE_URL or unset the empty variable for local dev."
+            )
+            print(msg)
+            raise ValueError(msg)
+
         # Render/Heroku compatibility: postgres:// -> postgresql://
         if raw_db_url.startswith('postgres://'):
-            return raw_db_url.replace('postgres://', 'postgresql://', 1)
+            raw_db_url = raw_db_url.replace('postgres://', 'postgresql://', 1)
+
+        if raw_db_url.startswith(('postgresql://', 'postgresql+psycopg2://')):
+            return raw_db_url
 
         # SQLite URI normalization
         if raw_db_url.startswith('sqlite:///'):
+            if require_pg:
+                msg = (
+                    f"[CRITICAL][Database] {used_var} is configured for SQLite, "
+                    "but REQUIRE_POSTGRESQL=true is enabled. PostgreSQL is required."
+                )
+                print(msg)
+                raise RuntimeError(msg)
+
             sqlite_target = raw_db_url.replace('sqlite:///', '', 1)
             if sqlite_target == ':memory:':
                 return 'sqlite:///:memory:'
@@ -35,12 +71,64 @@ def resolve_database_uri() -> str:
             normalized_path = resolved_abs.replace(os.sep, '/')
             return f"sqlite:///{normalized_path}"
 
-        return raw_db_url
+        msg = (
+            f"[CRITICAL][Database] Unsupported or malformed {used_var} scheme in '{raw_db_url.split(':', 1)[0]}'. "
+            "Expected 'postgresql://', 'postgres://', or 'sqlite:///'. "
+            "Refusing to silently fall back to an empty local SQLite database."
+        )
+        print(msg)
+        raise ValueError(msg)
 
-    # Default persistent SQLite file inside instance directory
+    if require_pg:
+        msg = (
+            "[CRITICAL][Database] REQUIRE_POSTGRESQL=true is set, but DATABASE_URL is missing! "
+            "Refusing to fall back to ephemeral local SQLite. Configure DATABASE_URL in Render Environment."
+        )
+        print(msg)
+        raise RuntimeError(msg)
+
+    if is_render:
+        print(
+            "[CRITICAL][Persistence] WARNING: Application is running on Render WITHOUT 'DATABASE_URL' configured! "
+            "Render Web Services have an EPHEMERAL filesystem — any student registered in local SQLite "
+            "(/opt/render/project/src/instance/hostel_food.db) WILL DISAPPEAR after 15 minutes of inactivity "
+            "(when you close your laptop) or on the next deploy. "
+            "Fix: Set DATABASE_URL to your Render PostgreSQL Internal Database URL in the Render Dashboard -> Environment."
+        )
+
+    # Default persistent SQLite file inside instance directory (for local development)
     os.makedirs(os.path.dirname(DEFAULT_DB_FILE), exist_ok=True)
     normalized_default = DEFAULT_DB_FILE.replace(os.sep, '/')
     return f"sqlite:///{normalized_default}"
+
+
+def get_engine_options(db_uri: str, environ=None) -> dict:
+    """
+    Build SQLAlchemy engine options for reliable cloud PostgreSQL and local SQLite persistence.
+    Enables pool_pre_ping=True and pool_recycle=280 so idle cloud PostgreSQL connections
+    never fail after laptop sleep or mobile reconnection.
+    """
+    env = environ if environ is not None else os.environ
+    uri = (db_uri or '').strip()
+
+    if uri.startswith('postgresql'):
+        return {
+            'pool_pre_ping': True,
+            'pool_recycle': int(env.get('DB_POOL_RECYCLE', 280)),
+            'pool_size': int(env.get('DB_POOL_SIZE', 5)),
+            'max_overflow': int(env.get('DB_MAX_OVERFLOW', 10)),
+            'connect_args': {
+                'connect_timeout': int(env.get('DB_CONNECT_TIMEOUT', 10)),
+            },
+        }
+
+    if uri == 'sqlite:///:memory:':
+        return {'pool_pre_ping': True}
+
+    return {
+        'pool_pre_ping': True,
+        'connect_args': {'timeout': 15},
+    }
 
 
 class Config:
@@ -56,6 +144,7 @@ class Config:
 
     SQLALCHEMY_DATABASE_URI = resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = get_engine_options(SQLALCHEMY_DATABASE_URI)
 
     # Production Session Cookie Security
     SESSION_COOKIE_HTTPONLY = True

@@ -34,7 +34,17 @@
     </header>
 
     <main id="admin-main" class="main-content container admin-container" role="main">
-        
+        {% if db_diagnostics and db_diagnostics.persistence_warning %}
+        <div id="dbPersistenceWarningBanner" role="alert" style="margin-bottom: 1rem; padding: 0.9rem 1.2rem; border-radius: 10px; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.45); color: #fca5a5; font-size: 0.9rem; line-height: 1.5;">
+            <strong>⚠️ Ephemeral Database Warning:</strong> {{ db_diagnostics.persistence_warning }}
+        </div>
+        {% elif db_diagnostics %}
+        <div id="dbPersistenceStatusBadge" style="margin-bottom: 0.85rem; padding: 0.55rem 1rem; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <span>🗄️ <strong>Database Active:</strong> {{ db_diagnostics.database_type | upper }} ({{ 'Cloud Persistent PostgreSQL' if db_diagnostics.database_type == 'postgresql' else 'Local Persistent Disk' }})</span>
+            <span>✅ Connected | Loaded Students: <strong>{{ db_diagnostics.counts.students if db_diagnostics.counts else 0 }}</strong></span>
+        </div>
+        {% endif %}
+
         <!-- Top Key Metrics Dashboard Ribbon -->
         <section class="metrics-grid multi-metrics">
             <div class="card metric-card">
