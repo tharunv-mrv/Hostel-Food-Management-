@@ -2422,19 +2422,26 @@ class RenderCloudPersistenceVerificationTests(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_render_01_database_url_normalization_and_engine_options(self):
-        """Verify postgres:// -> postgresql:// normalization and cloud connection pool pre-ping options."""
+        """Verify postgres:// and postgresql:// normalize to postgresql+psycopg2:// for SQLAlchemy 2.1+ and cloud pool_pre_ping options."""
+        from sqlalchemy import create_engine
         from config import resolve_database_uri, get_engine_options
 
         pg_uri = resolve_database_uri({'DATABASE_URL': 'postgres://u1:secretpass@dpg-xyz-a.oregon-postgres.render.com:5432/hostel_db'})
-        self.assertEqual(pg_uri, 'postgresql://u1:secretpass@dpg-xyz-a.oregon-postgres.render.com:5432/hostel_db')
+        self.assertEqual(pg_uri, 'postgresql+psycopg2://u1:secretpass@dpg-xyz-a.oregon-postgres.render.com:5432/hostel_db')
 
         pg_uri2 = resolve_database_uri({'INTERNAL_DATABASE_URL': 'postgresql://u2:pass2@dpg-internal:5432/hostel_db'})
-        self.assertEqual(pg_uri2, 'postgresql://u2:pass2@dpg-internal:5432/hostel_db')
+        self.assertEqual(pg_uri2, 'postgresql+psycopg2://u2:pass2@dpg-internal:5432/hostel_db')
 
         opts = get_engine_options(pg_uri)
         self.assertTrue(opts.get('pool_pre_ping'))
         self.assertEqual(opts.get('pool_recycle'), 280)
         self.assertIn('connect_timeout', opts.get('connect_args', {}))
+
+        # Verify SQLAlchemy 2.1+ engine creation loads psycopg2 without ModuleNotFoundError: No module named 'psycopg'
+        eng = create_engine(pg_uri, **opts)
+        self.assertEqual(eng.dialect.name, 'postgresql')
+        self.assertEqual(eng.dialect.driver, 'psycopg2')
+        eng.dispose()
 
     def test_render_02_no_silent_fallback_on_invalid_or_missing_postgresql(self):
         """Verify misconfigured DATABASE_URL or missing PostgreSQL when REQUIRE_POSTGRESQL=true raises explicit errors instead of falling back to SQLite."""

@@ -40,11 +40,15 @@ def resolve_database_uri(environ=None) -> str:
             print(msg)
             raise ValueError(msg)
 
-        # Render/Heroku compatibility: postgres:// -> postgresql://
+        # Render/SQLAlchemy 2.1+ compatibility: explicitly target psycopg2-binary driver
         if raw_db_url.startswith('postgres://'):
-            raw_db_url = raw_db_url.replace('postgres://', 'postgresql://', 1)
+            raw_db_url = raw_db_url.replace('postgres://', 'postgresql+psycopg2://', 1)
+        elif raw_db_url.startswith('postgresql://'):
+            raw_db_url = raw_db_url.replace('postgresql://', 'postgresql+psycopg2://', 1)
+        elif raw_db_url.startswith('postgresql+psycopg://'):
+            raw_db_url = raw_db_url.replace('postgresql+psycopg://', 'postgresql+psycopg2://', 1)
 
-        if raw_db_url.startswith(('postgresql://', 'postgresql+psycopg2://')):
+        if raw_db_url.startswith('postgresql+psycopg2://'):
             return raw_db_url
 
         # SQLite URI normalization
