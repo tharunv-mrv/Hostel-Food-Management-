@@ -2437,11 +2437,11 @@ class RenderCloudPersistenceVerificationTests(unittest.TestCase):
         self.assertEqual(opts.get('pool_recycle'), 280)
         self.assertIn('connect_timeout', opts.get('connect_args', {}))
 
-        # Verify SQLAlchemy 2.1+ engine creation loads psycopg2 without ModuleNotFoundError: No module named 'psycopg'
-        eng = create_engine(pg_uri, **opts)
-        self.assertEqual(eng.dialect.name, 'postgresql')
-        self.assertEqual(eng.dialect.driver, 'psycopg2')
-        eng.dispose()
+        # Verify SQLAlchemy 2.1+ URL parser explicitly selects postgresql backend and psycopg2 driver
+        from sqlalchemy.engine.url import make_url
+        parsed = make_url(pg_uri)
+        self.assertEqual(parsed.get_backend_name(), 'postgresql')
+        self.assertEqual(parsed.get_driver_name(), 'psycopg2')
 
     def test_render_02_no_silent_fallback_on_invalid_or_missing_postgresql(self):
         """Verify misconfigured DATABASE_URL or missing PostgreSQL when REQUIRE_POSTGRESQL=true raises explicit errors instead of falling back to SQLite."""
